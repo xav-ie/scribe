@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  # Manual runs build + upload a zip artifact but do NOT cut a GitHub Release.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # manifest.config.ts derives the manifest version from package.json, so a
+      # tag that disagrees would ship a mislabelled build. Fail loudly instead.
+      - name: Verify tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          PKG="v$(node -p "require('./package.json').version")"
+          if [ "$PKG" != "${{ github.ref_name }}" ]; then
+            echo "::error::Tag ${{ github.ref_name }} != package.json ($PKG). Bump package.json or fix the tag."
+            exit 1
+          fi
+
+      # Gate the release on the same checks CI runs.
+      - run: pnpm check
+      - run: pnpm build
+
+      - name: Zip extension
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          # Zip the *contents* of dist so manifest.json sits at the zip root —
+          # that's the layout the Chrome Web Store and "Load unpacked" expect.
+          cd dist && zip -r "../meeting-capture-extension-${VERSION}.zip" .
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: meeting-capture-extension-${{ env.VERSION }}
+          path: meeting-capture-extension-*.zip
+          retention-days: 14
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: meeting-capture-extension-*.zip
+          generate_release_notes: true
+          # Tags with a pre-release suffix (v0.2.0-beta.1) ship as pre-releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # --- Optional: publish to the Chrome Web Store --------------------------------
+  # Enable once the extension has a CWS listing. Add these repo secrets first:
+  #   CWS_EXTENSION_ID, CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN
+  # (generated via the Chrome Web Store API OAuth flow). Then uncomment:
+  #
+  # publish:
+  #   needs: release
+  #   if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 10
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         pattern: meeting-capture-extension-*
+  #         merge-multiple: true
+  #     - uses: mnao305/chrome-extension-upload@v5
+  #       with:
+  #         file-path: meeting-capture-extension-*.zip
+  #         extension-id: ${{ secrets.CWS_EXTENSION_ID }}
+  #         client-id: ${{ secrets.CWS_CLIENT_ID }}
+  #         client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
+  #         refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
+  #         publish: true

@@ -97,6 +97,29 @@ Stack: pnpm, flat ESLint (typescript-eslint, unicorn, sonarjs, import-x,
 regexp, n), Prettier (single quotes), knip, with `minimumReleaseAge`
 supply-chain hygiene.
 
+## CI / Releases
+
+Two GitHub Actions workflows (`.github/workflows/`):
+
+- **Checks** — on every push to `main` and every PR, runs `check:types`,
+  `check:lint`, `check:format`, `check:knip` and a `build` in parallel.
+- **Release** — on a `v*.*.*` tag, re-runs the checks, builds, zips `dist/` into
+  `meeting-capture-extension-<version>.zip` (manifest at the zip root) and cuts a
+  GitHub Release with auto-generated notes. A manual `workflow_dispatch` run
+  builds and uploads the zip as an artifact without creating a release.
+
+Cut a release — `pnpm version` keeps the tag and `package.json` (and therefore
+the built `manifest.json`) in lockstep, which the workflow enforces:
+
+```bash
+pnpm version patch        # bumps package.json, commits, tags v0.1.1
+git push --follow-tags    # pushes the commit + tag → triggers Release
+```
+
+Publishing to the Chrome Web Store is wired up but commented out in
+`release.yml` — enable it once a CWS listing exists and the `CWS_*` secrets are
+set.
+
 ## Configure the endpoint
 
 Set the transcription endpoint in the popup (persisted via `chrome.storage`).
