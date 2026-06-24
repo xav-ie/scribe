@@ -20,15 +20,25 @@ service so the capture layer stays swappable.
 
 ## Architecture
 
-```
-┌─────────────────────────────┐      POST audio/webm       ┌────────────────────────────┐
-│  Chrome (meeting tab)        │ ─────────────────────────▶ │  WhisperX service (separate) │
-│                             │                            │                              │
-│  • service worker (orch.)   │   { language, segments: [  │   transcribe → align →       │
-│  • offscreen doc (capture)  │ ◀──  {speaker,start,end,    │   diarize (pyannote)         │
-│  • popup (start/stop UI)    │       text}, ... ] }        │                              │
-│  • micsetup page (mic grant)│                            │                              │
-└─────────────────────────────┘                            └────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph chrome["Chrome — meeting tab"]
+        pop["popup<br/>(start / stop UI)"]
+        sw["service worker<br/>(orchestrator)"]
+        off["offscreen doc<br/>(capture engine)"]
+        mic["micsetup page<br/>(mic grant)"]
+    end
+
+    subgraph svc["WhisperX service (separate)"]
+        pipe["transcribe → align →<br/>diarize (pyannote)"]
+    end
+
+    pop -- "start / stop" --> sw
+    sw -- "tab stream id" --> off
+    mic -. "grants mic" .-> off
+
+    off == "POST audio/webm" ==> pipe
+    pipe == "{ language, segments:<br/>[ {speaker, start, end, text} ] }" ==> off
 ```
 
 - **`src/background.ts`** — service worker. Brokers a tab `MediaStream` id via
