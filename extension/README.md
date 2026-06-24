@@ -103,18 +103,28 @@ Two GitHub Actions workflows (`.github/workflows/`):
 
 - **Checks** — on every push to `main` and every PR, runs `check:types`,
   `check:lint`, `check:format`, `check:knip` and a `build` in parallel.
-- **Release** — on a `v*.*.*` tag, re-runs the checks, builds, zips `dist/` into
-  `meeting-capture-extension-<version>.zip` (manifest at the zip root) and cuts a
-  GitHub Release with auto-generated notes. A manual `workflow_dispatch` run
-  builds and uploads the zip as an artifact without creating a release.
+- **Release** — [Changesets](https://github.com/changesets/changesets)-driven.
 
-Cut a release — `pnpm version` keeps the tag and `package.json` (and therefore
-the built `manifest.json`) in lockstep, which the workflow enforces:
+Releases are versioned with Changesets (no manual version bumps):
 
-```bash
-pnpm version patch        # bumps package.json, commits, tags v0.1.1
-git push --follow-tags    # pushes the commit + tag → triggers Release
-```
+1. As part of any change, record a changeset and commit it with your PR:
+   ```bash
+   pnpm changeset           # pick patch/minor/major + write a summary
+   ```
+2. When the PR merges to `main`, the Release workflow opens (or force-updates) a
+   rolling **"Version Packages"** PR that bumps `package.json`, writes
+   `CHANGELOG.md`, and deletes the consumed changeset files.
+3. **Merge the Version Packages PR.** The next push to `main` has no pending
+   changesets, so the workflow builds, zips `dist/` into
+   `meeting-capture-extension-<version>.zip` (manifest at the zip root), and cuts
+   a `vX.Y.Z` GitHub Release using that version's `CHANGELOG.md` section as the
+   notes.
+
+> One-time repo setting: **Settings → Actions → General → Workflow permissions →
+> "Allow GitHub Actions to create and approve pull requests"** must be enabled
+> for the action to open the Version Packages PR. Since `manifest.config.ts`
+> reads `package.json`, the released `manifest.json` version always matches the
+> tag automatically.
 
 Publishing to the Chrome Web Store is wired up but commented out in
 `release.yml` — enable it once a CWS listing exists and the `CWS_*` secrets are

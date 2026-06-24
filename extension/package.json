@@ -20,9 +20,12 @@
     "check:format": "prettier --check .",
     "check:knip": "knip",
     "lint": "eslint . --fix",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "changeset": "changeset",
+    "version": "changeset version && pnpm install --lockfile-only"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.27.1",
     "@crxjs/vite-plugin": "^2.0.0-beta.36",
     "@eslint/js": "^10.0.1",
     "@types/chrome": "^0.0.287",
