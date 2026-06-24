@@ -1,0 +1,7 @@
+# Refuse to install any package version released in the last 14 days
+# (in minutes). Supply-chain hygiene against typosquats and freshly
+# compromised releases. https://pnpm.io/settings#minimumreleaseage
+minimumReleaseAge: 20160
+onlyBuiltDependencies:
+  - esbuild
+  - unrs-resolver

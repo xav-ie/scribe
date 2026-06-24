@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meeting Capture</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Meeting Capture</h1>
+      <span id="status" class="status idle">idle</span>
+    </header>
+
+    <button id="record" class="primary">Start recording</button>
+
+    <section class="options">
+      <label class="row">
+        <input type="checkbox" id="withMic" />
+        <span>Capture my microphone</span>
+        <a id="micSetup" href="#" class="link">grant&nbsp;access</a>
+      </label>
+
+      <label class="row">
+        <input type="checkbox" id="saveRaw" />
+        <span>Also save raw .webm (debug)</span>
+      </label>
+
+      <label class="field">
+        <span>Transcription endpoint</span>
+        <input type="url" id="endpoint" spellcheck="false" />
+      </label>
+    </section>
+
+    <section id="result" class="result hidden">
+      <h2>Transcript</h2>
+      <div id="transcript"></div>
+    </section>
+
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>
