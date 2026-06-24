@@ -1,6 +1,10 @@
-// Messages exchanged between popup <-> background <-> offscreen.
-// `target` namespaces the message so each context can ignore traffic not meant
-// for it (chrome.runtime.sendMessage is a broadcast).
+// Messages exchanged between popup -> background -> offscreen. Durable UI state
+// lives in chrome.storage.local (see state.ts), but ONLY the background worker
+// and the popup may touch chrome.storage — the offscreen document has access to
+// chrome.runtime messaging only. So the offscreen doc reports state transitions
+// to the background via STATE_UPDATE, and the background persists them.
+
+import type { RecState } from './state';
 
 interface StartRecording {
   type: 'START_RECORDING';
@@ -12,12 +16,13 @@ interface StopRecording {
   target: 'background';
 }
 
-interface GetState {
-  type: 'GET_STATE';
+// offscreen -> background: persist this patch to storage.
+interface StateUpdate {
+  type: 'STATE_UPDATE';
   target: 'background';
+  patch: Partial<RecState>;
 }
 
-// background -> offscreen
 interface OffscreenStart {
   type: 'OFFSCREEN_START';
   target: 'offscreen';
@@ -32,39 +37,12 @@ interface OffscreenStop {
   target: 'offscreen';
 }
 
-// offscreen -> background/popup
-interface RecordingStarted {
-  type: 'RECORDING_STARTED';
-  target: 'popup';
-}
-
-interface RecordingError {
-  type: 'RECORDING_ERROR';
-  target: 'popup';
-  error: string;
-}
-
-interface TranscriptReady {
-  type: 'TRANSCRIPT_READY';
-  target: 'popup';
-  transcript: TranscriptResponse;
-}
-
-interface RecordingFinalizing {
-  type: 'RECORDING_FINALIZING';
-  target: 'popup';
-}
-
 export type Message =
   | StartRecording
   | StopRecording
-  | GetState
+  | StateUpdate
   | OffscreenStart
-  | OffscreenStop
-  | RecordingStarted
-  | RecordingError
-  | TranscriptReady
-  | RecordingFinalizing;
+  | OffscreenStop;
 
 export type RecordingStatus = 'idle' | 'recording' | 'finalizing';
 

@@ -1,6 +1,10 @@
 // The capture engine. Runs in an offscreen document so it has access to the
 // DOM APIs (getUserMedia, AudioContext, MediaRecorder) the service worker lacks.
 //
+// IMPORTANT: offscreen documents can use chrome.runtime messaging ONLY — not
+// chrome.storage and not other extension APIs. So state transitions are sent to
+// the background worker (STATE_UPDATE), which persists them to storage.
+//
 // Audio graph:
 //
 //   tabStream ──▶ tabSource ──┬──▶ ctx.destination   (speakers: keep hearing it)
@@ -10,9 +14,14 @@
 // Capturing a tab mutes its audio for the user until you reconnect it to the
 // output. That `tabSource.connect(ctx.destination)` line is the unmute fix.
 
+import type { RecState } from './state';
 import type { Message, TranscriptResponse } from './types';
 
 const MIME_TYPE = 'audio/webm;codecs=opus';
+// WhisperX large-v3 + diarization on a GPU can take a while; allow a generous
+// window, but cap it so a genuinely hung request surfaces as an error rather
+// than leaving the UI in "finalizing" forever.
+const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 
 interface Session {
   ctx: AudioContext;
@@ -26,8 +35,72 @@ interface Session {
 
 let session: Session | null = null;
 
-function send(msg: Message): void {
-  chrome.runtime.sendMessage(msg).catch(() => {});
+// Report a state transition to the background worker, which owns chrome.storage.
+function sendState(patch: Partial<RecState>): void {
+  chrome.runtime
+    .sendMessage({
+      type: 'STATE_UPDATE',
+      target: 'background',
+      patch,
+    } satisfies Message)
+    .catch(() => {});
+}
+
+// Chrome's tab capture reliably yields a usable audio track only when video is
+// requested alongside it — audio-only tab constraints frequently hand back a
+// silent/empty track. We request video for reliability but never record it.
+function tabConstraints(
+  streamId: string,
+  withVideo: boolean,
+): MediaStreamConstraints {
+  const mandatory = { chromeMediaSource: 'tab', chromeMediaSourceId: streamId };
+  return {
+    // @ts-expect-error non-standard Chrome tabCapture constraints
+    audio: { mandatory },
+    // @ts-expect-error non-standard Chrome tabCapture constraints
+    video: withVideo ? { mandatory } : false,
+  };
+}
+
+async function captureTabStream(streamId: string): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia(
+      tabConstraints(streamId, true),
+    );
+  } catch (error) {
+    console.warn(
+      '[offscreen] tab audio+video capture failed; retrying audio-only',
+      error,
+    );
+    return navigator.mediaDevices.getUserMedia(tabConstraints(streamId, false));
+  }
+}
+
+// Logs the RMS level of a source every couple seconds — use it to confirm the
+// remote (tab) audio actually carries signal (rms > ~0.005 means sound).
+function attachLevelMeter(
+  ctx: AudioContext,
+  source: MediaStreamAudioSourceNode,
+  label: string,
+): void {
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 256;
+  source.connect(analyser);
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  const id = setInterval(() => {
+    analyser.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (const v of buf) {
+      const x = (v - 128) / 128;
+      sum += x * x;
+    }
+    console.log(
+      `[offscreen] ${label} level (rms): ${Math.sqrt(sum / buf.length).toFixed(3)}`,
+    );
+  }, 2000);
+  source.mediaStream
+    .getAudioTracks()[0]
+    ?.addEventListener('ended', () => clearInterval(id));
 }
 
 async function start(opts: {
@@ -39,17 +112,21 @@ async function start(opts: {
   if (session) return;
 
   try {
-    // Audio-only tab capture. Note the non-standard `mandatory` constraints —
-    // this is the Chrome tabCapture handshake, not standard getUserMedia.
-    const tabStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        // @ts-expect-error chrome-specific tabCapture constraints
-        mandatory: {
-          chromeMediaSource: 'tab',
-          chromeMediaSourceId: opts.streamId,
-        },
-      },
-      video: false,
+    // Capture the tab (audio + video; we only record the audio). Requesting
+    // video is what makes the audio track actually carry the tab's sound.
+    const tabStream = await captureTabStream(opts.streamId);
+    const tabAudio = tabStream.getAudioTracks()[0];
+    if (!tabAudio) {
+      throw new Error(
+        'Tab capture returned no audio track — nothing to record.',
+      );
+    }
+    tabAudio.enabled = true;
+    console.log('[offscreen] tab audio track:', {
+      label: tabAudio.label,
+      muted: tabAudio.muted,
+      enabled: tabAudio.enabled,
+      settings: tabAudio.getSettings(),
     });
 
     let micStream: MediaStream | null = null;
@@ -76,8 +153,10 @@ async function start(opts: {
     }
 
     const ctx = new AudioContext();
-    const tabSource = ctx.createMediaStreamSource(tabStream);
+    await ctx.resume().catch(() => {});
+    const tabSource = ctx.createMediaStreamSource(new MediaStream([tabAudio]));
     tabSource.connect(ctx.destination); // unmute: user keeps hearing the meeting
+    attachLevelMeter(ctx, tabSource, 'TAB'); // diagnostic: is remote audio flowing?
 
     const recordDest = ctx.createMediaStreamDestination();
     tabSource.connect(recordDest);
@@ -111,21 +190,21 @@ async function start(opts: {
       saveRaw: opts.saveRaw,
     };
 
-    send({ type: 'RECORDING_STARTED', target: 'popup' });
+    console.log(`[offscreen] recording started (mic: ${micStream !== null})`);
+    sendState({ status: 'recording' });
   } catch (error) {
     teardown();
-    send({
-      type: 'RECORDING_ERROR',
-      target: 'popup',
-      error: error instanceof Error ? error.message : String(error),
-    });
+    const message = error instanceof Error ? error.message : String(error);
+    console.error('[offscreen] start failed:', message);
+    sendState({ status: 'idle', error: message });
   }
 }
 
 function stop(): void {
   if (!session) return;
-  send({ type: 'RECORDING_FINALIZING', target: 'popup' });
-  // Triggers recorder.onstop -> finalize().
+  console.log('[offscreen] stop requested');
+  sendState({ status: 'finalizing' });
+  // Triggers the recorder 'stop' event -> finalize().
   session.recorder.stop();
 }
 
@@ -135,25 +214,49 @@ async function finalize(): Promise<void> {
   const blob = new Blob(chunks, { type: 'audio/webm' });
 
   if (saveRaw) saveLocally(blob);
-
   teardown();
 
+  console.log(`[offscreen] finalize: ${blob.size} bytes -> ${endpoint}`);
+
+  if (blob.size === 0) {
+    sendState({
+      status: 'idle',
+      error:
+        'Captured 0 bytes — no tab audio was recorded. Make sure the tab is actually playing sound.',
+    });
+    return;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
   try {
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'audio/webm' },
       body: blob,
+      signal: controller.signal,
     });
-    if (!res.ok) throw new Error(`service responded ${res.status}`);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      const suffix = detail ? `: ${detail.slice(0, 200)}` : '';
+      throw new Error(`service responded ${res.status}${suffix}`);
+    }
     const transcript = (await res.json()) as TranscriptResponse;
-    send({ type: 'TRANSCRIPT_READY', target: 'popup', transcript });
+    console.log(
+      `[offscreen] transcript: ${transcript.segments?.length ?? 0} segments`,
+    );
+    sendState({ status: 'idle', transcript, bytes: blob.size });
   } catch (error) {
-    console.error('[offscreen] transcription POST failed', error);
-    send({
-      type: 'RECORDING_ERROR',
-      target: 'popup',
-      error: error instanceof Error ? error.message : String(error),
-    });
+    let message: string;
+    if (controller.signal.aborted) {
+      message = `Transcription timed out after ${UPLOAD_TIMEOUT_MS / 1000}s`;
+    } else {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    console.error('[offscreen] transcription POST failed:', message);
+    sendState({ status: 'idle', error: message, bytes: blob.size });
+  } finally {
+    clearTimeout(timer);
   }
 }
 

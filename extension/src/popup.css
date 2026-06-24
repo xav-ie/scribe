@@ -126,6 +126,23 @@ button.primary:disabled {
 .link:hover {
   text-decoration: underline;
 }
+.link.granted {
+  color: var(--ok);
+}
+
+.error {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 93, 93, 0.14);
+  border: 1px solid rgba(255, 93, 93, 0.4);
+  color: var(--danger);
+  font-size: 12px;
+  word-break: break-word;
+}
+.error.hidden {
+  display: none;
+}
 
 .result {
   margin-top: 14px;

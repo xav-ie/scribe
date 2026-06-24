@@ -1,12 +1,16 @@
 // Service worker: orchestrates capture. It owns no audio itself — it brokers a
-// tab MediaStream id to the offscreen document and tracks recording state.
+// tab MediaStream id to the offscreen document. Durable status lives in
+// chrome.storage.local (state.ts), so it survives this worker being torn down.
 
 import { getSettings } from './config';
-import type { Message, RecordingStatus } from './types';
+import { getState, setState } from './state';
+import type { Message } from './types';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
 
-let status: RecordingStatus = 'idle';
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 async function hasOffscreenDocument(): Promise<boolean> {
   const contexts = await chrome.runtime.getContexts({
@@ -31,15 +35,20 @@ async function ensureOffscreenDocument(): Promise<void> {
 }
 
 async function startRecording(): Promise<void> {
+  const { status } = await getState();
   if (status !== 'idle') return;
+
+  // Optimistic, so a double-click can't start two captures. The offscreen doc
+  // reaffirms 'recording' once the stream is actually open.
+  await setState({
+    status: 'recording',
+    transcript: undefined,
+    error: undefined,
+  });
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
-    notifyPopup({
-      type: 'RECORDING_ERROR',
-      target: 'popup',
-      error: 'No active tab to capture.',
-    });
+    await setState({ status: 'idle', error: 'No active tab to capture.' });
     return;
   }
 
@@ -57,66 +66,67 @@ async function startRecording(): Promise<void> {
 
   await ensureOffscreenDocument();
 
-  status = 'recording';
-  chrome.runtime.sendMessage({
-    type: 'OFFSCREEN_START',
-    target: 'offscreen',
-    streamId,
-    withMic: settings.withMic,
-    endpoint: settings.endpoint,
-    saveRaw: settings.saveRaw,
-  } satisfies Message);
+  chrome.runtime
+    .sendMessage({
+      type: 'OFFSCREEN_START',
+      target: 'offscreen',
+      streamId,
+      withMic: settings.withMic,
+      endpoint: settings.endpoint,
+      saveRaw: settings.saveRaw,
+    } satisfies Message)
+    .catch(() => {});
 }
 
-function stopRecording(): void {
+async function stopRecording(): Promise<void> {
+  const { status } = await getState();
   if (status !== 'recording') return;
-  status = 'finalizing';
-  chrome.runtime.sendMessage({
-    type: 'OFFSCREEN_STOP',
-    target: 'offscreen',
-  } satisfies Message);
+  await setState({ status: 'finalizing' });
+  chrome.runtime
+    .sendMessage({
+      type: 'OFFSCREEN_STOP',
+      target: 'offscreen',
+    } satisfies Message)
+    .catch(() => {});
 }
 
-function notifyPopup(msg: Message): void {
-  // Popup may be closed; ignore the "no receiver" rejection.
-  chrome.runtime.sendMessage(msg).catch(() => {});
-}
-
-chrome.runtime.onMessage.addListener(
-  (message: Message, _sender, sendResponse) => {
-    switch (message.type) {
-      case 'START_RECORDING': {
-        startRecording().catch((error) => {
-          status = 'idle';
-          notifyPopup({
-            type: 'RECORDING_ERROR',
-            target: 'popup',
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-        break;
-      }
-      case 'STOP_RECORDING': {
-        stopRecording();
-        break;
-      }
-      case 'GET_STATE': {
-        sendResponse({ status });
-        return true;
-      }
-      // Status transitions reported by the offscreen document.
-      case 'RECORDING_ERROR': {
-        status = 'idle';
-        break;
-      }
-      case 'TRANSCRIPT_READY': {
-        status = 'idle';
-        break;
-      }
-      case 'RECORDING_FINALIZING': {
-        status = 'finalizing';
-        break;
-      }
+chrome.runtime.onMessage.addListener((message: Message) => {
+  if (message.target !== 'background') return;
+  switch (message.type) {
+    case 'START_RECORDING': {
+      startRecording().catch((error) =>
+        setState({ status: 'idle', error: errorMessage(error) }),
+      );
+      break;
     }
-  },
-);
+    case 'STOP_RECORDING': {
+      stopRecording().catch(() => {});
+      break;
+    }
+    case 'STATE_UPDATE': {
+      // Offscreen doc can't write storage; it delegates the transition to us.
+      setState(message.patch).catch(() => {});
+      break;
+    }
+  }
+});
+
+// Drop stale state on extension reload / browser restart: if storage says we're
+// mid-capture but the offscreen context is gone, nothing is actually recording —
+// reset so the popup isn't stuck on "recording"/"finalizing". (When a real
+// capture is in flight the offscreen doc still exists, so this leaves it alone.)
+// Registered as listeners, NOT a top-level await — MV3 service workers forbid
+// top-level await.
+async function reconcileStaleState(): Promise<void> {
+  const { status } = await getState();
+  if (status !== 'idle' && !(await hasOffscreenDocument())) {
+    await setState({ status: 'idle' });
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  reconcileStaleState().catch(() => {});
+});
+chrome.runtime.onStartup.addListener(() => {
+  reconcileStaleState().catch(() => {});
+});

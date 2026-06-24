@@ -1,4 +1,5 @@
 import { getSettings, setSettings } from './config';
+import { getState, onStateChange, type RecState } from './state';
 import type { Message, RecordingStatus, TranscriptResponse } from './types';
 
 const $ = <T extends HTMLElement>(id: string) =>
@@ -16,23 +17,51 @@ const micToggle = $<HTMLInputElement>('withMic');
 const saveRawToggle = $<HTMLInputElement>('saveRaw');
 const endpointInput = $<HTMLInputElement>('endpoint');
 const micSetupLink = $<HTMLAnchorElement>('micSetup');
+const errorEl = $<HTMLElement>('error');
 const resultEl = $<HTMLElement>('result');
 const transcriptEl = $<HTMLElement>('transcript');
 
-let status: RecordingStatus = 'idle';
+// The popup is a pure reflection of chrome.storage.local state — it never holds
+// authoritative status of its own, so closing/reopening it is always accurate.
+function render(state: RecState): void {
+  statusEl.textContent = state.status;
+  statusEl.className = `status ${state.status}`;
 
-function render(): void {
-  statusEl.textContent = status;
-  statusEl.className = `status ${status}`;
+  recordBtn.disabled = state.status === 'finalizing';
+  recordBtn.textContent = LABELS[state.status];
+  recordBtn.classList.toggle('recording', state.status === 'recording');
 
-  recordBtn.disabled = status === 'finalizing';
-  recordBtn.textContent = LABELS[status];
-  recordBtn.classList.toggle('recording', status === 'recording');
+  if (state.error) {
+    errorEl.textContent = state.error;
+    errorEl.classList.remove('hidden');
+  } else {
+    errorEl.classList.add('hidden');
+  }
+
+  if (state.transcript && state.transcript.segments.length > 0) {
+    renderTranscript(state.transcript);
+  } else {
+    resultEl.classList.add('hidden');
+  }
 }
 
-function setStatus(next: RecordingStatus): void {
-  status = next;
-  render();
+function applyMicPermission(permission: PermissionState): void {
+  const granted = permission === 'granted';
+  micSetupLink.textContent = granted ? 'access granted ✓' : 'grant access';
+  micSetupLink.classList.toggle('granted', granted);
+}
+
+async function trackMicPermission(): Promise<void> {
+  try {
+    const status = await navigator.permissions.query({
+      name: 'microphone' as PermissionName,
+    });
+    applyMicPermission(status.state);
+    // Update live if it's granted/revoked in another tab while the popup is open.
+    status.addEventListener('change', () => applyMicPermission(status.state));
+  } catch {
+    // permissions.query may not support "microphone" everywhere; leave default.
+  }
 }
 
 async function init(): Promise<void> {
@@ -41,21 +70,19 @@ async function init(): Promise<void> {
   saveRawToggle.checked = settings.saveRaw;
   endpointInput.value = settings.endpoint;
 
-  const state = (await chrome.runtime.sendMessage({
-    type: 'GET_STATE',
-    target: 'background',
-  } satisfies Message)) as { status: RecordingStatus } | undefined;
-  setStatus(state?.status ?? 'idle');
+  render(await getState());
+  onStateChange(render);
+  await trackMicPermission();
 }
 
 recordBtn.addEventListener('click', () => {
-  if (status === 'recording') {
+  // Buttons only send commands; the resulting state change re-renders the UI.
+  if (recordBtn.classList.contains('recording')) {
     chrome.runtime.sendMessage({
       type: 'STOP_RECORDING',
       target: 'background',
     } satisfies Message);
-    setStatus('finalizing');
-  } else if (status === 'idle') {
+  } else if (!recordBtn.disabled) {
     chrome.runtime.sendMessage({
       type: 'START_RECORDING',
       target: 'background',
@@ -103,31 +130,5 @@ function renderTranscript(t: TranscriptResponse): void {
   }
   resultEl.classList.remove('hidden');
 }
-
-chrome.runtime.onMessage.addListener((message: Message) => {
-  if (message.target !== 'popup') return;
-  switch (message.type) {
-    case 'RECORDING_STARTED': {
-      setStatus('recording');
-      break;
-    }
-    case 'RECORDING_FINALIZING': {
-      setStatus('finalizing');
-      break;
-    }
-    case 'RECORDING_ERROR': {
-      setStatus('idle');
-      console.error('[popup]', message.error);
-      statusEl.textContent = 'error';
-      statusEl.title = message.error;
-      break;
-    }
-    case 'TRANSCRIPT_READY': {
-      setStatus('idle');
-      renderTranscript(message.transcript);
-      break;
-    }
-  }
-});
 
 await init();
