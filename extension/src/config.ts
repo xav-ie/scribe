@@ -1,18 +1,18 @@
 // Small typed wrapper over chrome.storage.sync for user-configurable settings.
 
 export interface Settings {
-  /** Full URL of the transcription endpoint, e.g. http://localhost:8000/transcribe */
-  endpoint: string;
+  /** WebSocket URL of the streaming ASR service, e.g. wss://scribe.lalala.casa/ws */
+  wsUrl: string;
   /** Capture the user's microphone alongside the tab audio. */
   withMic: boolean;
-  /** Also save the raw .webm locally via chrome.downloads-style blob URL (debug). */
-  saveRaw: boolean;
+  /** Log active-speaker detection + streaming diagnostics to the console. */
+  debug: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
-  endpoint: 'https://whisperx.lalala.casa/transcribe',
+  wsUrl: 'wss://scribe.lalala.casa/ws',
   withMic: false,
-  saveRaw: false,
+  debug: false,
 };
 
 export async function getSettings(): Promise<Settings> {

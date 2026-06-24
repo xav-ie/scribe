@@ -155,16 +155,42 @@ button.primary:disabled {
   display: none;
 }
 
-.seg {
-  margin-bottom: 8px;
+/* Legend of speakers detected this session. */
+.speakers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
 }
-.seg .who {
-  font-weight: 600;
-  color: var(--accent);
-  margin-right: 6px;
+.speakers:empty {
+  display: none;
 }
-.seg .ts {
-  color: var(--muted);
+.chip {
   font-size: 10px;
-  margin-right: 6px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--c);
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+}
+
+/* Play-script transcript: one coloured speaker header + line per turn. */
+.script .turn {
+  margin-bottom: 10px;
+}
+.script .speaker {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  margin-bottom: 1px;
+}
+.script .line {
+  color: var(--fg);
+}
+
+/* Un-attributed running transcript shown before any speaker events arrive. */
+.raw {
+  color: var(--fg);
+  white-space: pre-wrap;
 }

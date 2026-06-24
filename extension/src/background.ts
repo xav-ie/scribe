@@ -1,12 +1,55 @@
-// Service worker: orchestrates capture. It owns no audio itself — it brokers a
-// tab MediaStream id to the offscreen document. Durable status lives in
-// chrome.storage.local (state.ts), so it survives this worker being torn down.
+// Service worker: orchestrates capture AND joins the two live streams —
+// streamed ASR words (from the offscreen doc) and active-speaker changes (from
+// the content script) — into a speaker-attributed transcript it persists for the
+// popup. It owns no audio itself; it brokers a tab MediaStream id to the
+// offscreen document.
+//
+// The join inputs live in chrome.storage.local (joinSession) as well as an
+// in-memory cache, so a streamed word or speaker event arriving after the worker
+// was torn down still reconstructs the full transcript.
 
 import { getSettings } from './config';
+import { dlog, expose, setDebug } from './debug';
 import { getState, setState } from './state';
+import { joinTranscript, type SpeakerSpan, type Word } from './transcript';
 import type { Message } from './types';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
+const SESSION_KEY = 'joinSession';
+
+interface JoinSession {
+  active: boolean;
+  timeline: SpeakerSpan[];
+  captureStartEpoch: number | null;
+  words: Word[];
+  rawText: string;
+}
+
+const EMPTY_SESSION: JoinSession = {
+  active: false,
+  timeline: [],
+  captureStartEpoch: null,
+  words: [],
+  rawText: '',
+};
+
+// In-memory cache so back-to-back events don't race on read-modify-write of
+// storage. Reloaded from storage if the worker was torn down between events.
+let mem: JoinSession | null = null;
+
+async function session(): Promise<JoinSession> {
+  if (mem) return mem;
+  const stored = await chrome.storage.local.get(SESSION_KEY);
+  mem = (stored[SESSION_KEY] as JoinSession | undefined) ?? {
+    ...EMPTY_SESSION,
+  };
+  return mem;
+}
+
+async function saveSession(next: JoinSession): Promise<void> {
+  mem = next;
+  await chrome.storage.local.set({ [SESSION_KEY]: next });
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -24,27 +67,39 @@ async function ensureOffscreenDocument(): Promise<void> {
   if (await hasOffscreenDocument()) return;
   await chrome.offscreen.createDocument({
     url: OFFSCREEN_PATH,
-    // USER_MEDIA: getUserMedia for the tab/mic streams.
-    // AUDIO_PLAYBACK: we re-route tab audio to speakers so it isn't muted.
     reasons: [
       'USER_MEDIA' as chrome.offscreen.Reason,
       'AUDIO_PLAYBACK' as chrome.offscreen.Reason,
     ],
-    justification: 'Record meeting tab audio for transcription.',
+    justification: 'Stream meeting tab audio for live transcription.',
   });
+}
+
+// Recompute the attributed transcript from the current join inputs and persist
+// it for the popup. Before any word timestamps exist there's nothing to attribute.
+async function recompute(s: JoinSession): Promise<void> {
+  const segments =
+    s.captureStartEpoch === null
+      ? []
+      : joinTranscript(s.words, s.captureStartEpoch, s.timeline);
+  dlog('[bg] recompute:', segments.length, 'segments | distinct speakers:', [
+    ...new Set(segments.map((x) => x.speaker)),
+  ]);
+  await setState({ segments, rawText: s.rawText });
 }
 
 async function startRecording(): Promise<void> {
   const { status } = await getState();
   if (status !== 'idle') return;
 
-  // Optimistic, so a double-click can't start two captures. The offscreen doc
-  // reaffirms 'recording' once the stream is actually open.
+  // Optimistic, so a double-click can't start two captures.
   await setState({
     status: 'recording',
-    transcript: undefined,
+    segments: [],
+    rawText: '',
     error: undefined,
   });
+  await saveSession({ ...EMPTY_SESSION, active: true });
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
@@ -54,8 +109,6 @@ async function startRecording(): Promise<void> {
 
   const settings = await getSettings();
 
-  // Must be obtained in the (gesture-backed) service worker, then handed to the
-  // offscreen doc which actually opens the stream.
   const streamId = await new Promise<string>((resolve, reject) => {
     chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id }, (id) => {
       const err = chrome.runtime.lastError;
@@ -72,8 +125,17 @@ async function startRecording(): Promise<void> {
       target: 'offscreen',
       streamId,
       withMic: settings.withMic,
-      endpoint: settings.endpoint,
-      saveRaw: settings.saveRaw,
+      wsUrl: settings.wsUrl,
+      debug: settings.debug,
+    } satisfies Message)
+    .catch(() => {});
+
+  // Tell the meeting tab's content script to re-emit the current speaker so the
+  // timeline is seeded from the first word. Harmless if no content script there.
+  chrome.tabs
+    .sendMessage(tab.id, {
+      type: 'RESET_SPEAKER',
+      target: 'content',
     } satisfies Message)
     .catch(() => {});
 }
@@ -81,13 +143,48 @@ async function startRecording(): Promise<void> {
 async function stopRecording(): Promise<void> {
   const { status } = await getState();
   if (status !== 'recording') return;
-  await setState({ status: 'finalizing' });
+  const s = await session();
+  await saveSession({ ...s, active: false });
   chrome.runtime
     .sendMessage({
       type: 'OFFSCREEN_STOP',
       target: 'offscreen',
     } satisfies Message)
     .catch(() => {});
+  await setState({ status: 'idle' });
+}
+
+async function onTranscriptUpdate(
+  words: Word[],
+  text: string,
+  captureStartEpoch: number,
+): Promise<void> {
+  const s = await session();
+  if (!s.active) return;
+  await saveSession({ ...s, words, rawText: text, captureStartEpoch });
+  await recompute(mem!);
+}
+
+async function onSpeakerEvent(name: string, atEpoch: number): Promise<void> {
+  const s = await session();
+  if (!s.active) {
+    dlog('[bg] speaker dropped (not recording):', name);
+    return;
+  }
+  // Collapse repeats: only a genuine change starts a new span.
+  if (s.timeline.at(-1)?.name === name) {
+    dlog('[bg] speaker dropped (same as current):', name);
+    return;
+  }
+  const timeline = [...s.timeline, { name, from: atEpoch }];
+  dlog(
+    '[bg] speaker:',
+    name,
+    '| timeline:',
+    timeline.map((t) => t.name),
+  );
+  await saveSession({ ...s, timeline });
+  await recompute(mem!);
 }
 
 chrome.runtime.onMessage.addListener((message: Message) => {
@@ -104,23 +201,33 @@ chrome.runtime.onMessage.addListener((message: Message) => {
       break;
     }
     case 'STATE_UPDATE': {
-      // Offscreen doc can't write storage; it delegates the transition to us.
       setState(message.patch).catch(() => {});
+      break;
+    }
+    case 'TRANSCRIPT_UPDATE': {
+      onTranscriptUpdate(
+        message.words,
+        message.text,
+        message.captureStartEpoch,
+      ).catch(() => {});
+      break;
+    }
+    case 'SPEAKER_EVENT': {
+      onSpeakerEvent(message.name, message.atEpoch).catch(() => {});
       break;
     }
   }
 });
 
-// Drop stale state on extension reload / browser restart: if storage says we're
-// mid-capture but the offscreen context is gone, nothing is actually recording —
-// reset so the popup isn't stuck on "recording"/"finalizing". (When a real
-// capture is in flight the offscreen doc still exists, so this leaves it alone.)
-// Registered as listeners, NOT a top-level await — MV3 service workers forbid
-// top-level await.
+// Drop stale state on reload/restart: if storage says we're recording but the
+// offscreen context is gone, nothing is actually streaming — reset so the popup
+// isn't stuck. (Registered as listeners, not top-level await — MV3 forbids it.)
 async function reconcileStaleState(): Promise<void> {
   const { status } = await getState();
   if (status !== 'idle' && !(await hasOffscreenDocument())) {
     await setState({ status: 'idle' });
+    const s = await session();
+    await saveSession({ ...s, active: false });
   }
 }
 
@@ -129,4 +236,48 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 chrome.runtime.onStartup.addListener(() => {
   reconcileStaleState().catch(() => {});
+});
+
+// Relay a mid-recording "capture microphone" toggle to the offscreen doc so the
+// mic is added/removed in the live audio graph without a stop/start. No-op when
+// idle (the next start picks the setting up normally).
+async function relayMic(enabled: boolean): Promise<void> {
+  const { status } = await getState();
+  if (status !== 'recording') return;
+  chrome.runtime
+    .sendMessage({
+      type: 'OFFSCREEN_SET_MIC',
+      target: 'offscreen',
+      enabled,
+    } satisfies Message)
+    .catch(() => {});
+}
+
+// --- debug + live settings ----------------------------------------------
+// Keep the debug flag in sync with the popup toggle (no reload needed), and
+// relay the mic toggle to a live recording.
+chrome.storage.sync.get({ debug: false }, (s) => setDebug(Boolean(s.debug)));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'sync') return;
+  if (changes.debug) {
+    setDebug(Boolean(changes.debug.newValue));
+    dlog('[bg] debug logging enabled');
+  }
+  if (changes.withMic) {
+    relayMic(Boolean(changes.withMic.newValue)).catch(() => {});
+  }
+});
+
+// Console test API — run from the service-worker DevTools console
+// (chrome://extensions → this extension → "service worker" → Inspect):
+//   await scribe.session()   inspect the live timeline / words / captureStartEpoch
+//   await scribe.state()     the persisted RecState (segments the popup shows)
+//   scribe.inject('Alice')   fake an active-speaker change — proves the join works
+//                            independently of DOM detection
+//   await scribe.reset()     clear + arm a fresh join session
+expose('scribe', {
+  state: () => getState(),
+  session: () => session(),
+  inject: (name: string) => onSpeakerEvent(name, Date.now()),
+  reset: () => saveSession({ ...EMPTY_SESSION, active: true }),
 });

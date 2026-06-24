@@ -1,7 +1,7 @@
 {
   "name": "meeting-capture-extension",
   "version": "0.1.0",
-  "description": "Chrome MV3 extension that captures meeting tab audio (Zoom, Google Meet, Teams, ...) and POSTs it to a self-hosted WhisperX transcription service.",
+  "description": "Chrome MV3 extension that streams meeting tab audio (Zoom, Google Meet, ...) to a self-hosted streaming ASR service and attributes captions to speakers by scraping the meeting's active-speaker indicator.",
   "type": "module",
   "license": "MIT",
   "private": true,

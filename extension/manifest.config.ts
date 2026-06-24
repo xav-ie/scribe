@@ -21,16 +21,26 @@ export default defineManifest({
     type: 'module',
   },
   permissions: ['tabCapture', 'offscreen', 'storage', 'activeTab', 'tabs'],
-  // The transcription service endpoints the offscreen doc is allowed to POST to.
-  // Add your own here; the offscreen fetch is blocked for any host not listed.
+  // WebSocket endpoints the offscreen doc may stream PCM to. A host must be
+  // listed here or the connection is blocked.
   host_permissions: [
-    'https://whisperx.lalala.casa/*', // deployed WhisperX service
-    'http://localhost:8000/*', // local mock / dev service
-    'http://127.0.0.1:8000/*',
+    'wss://scribe.lalala.casa/*', // deployed streaming ASR service
+    'ws://localhost:8000/*', // local dev service
+    'ws://127.0.0.1:8000/*',
   ],
-  // Declaring the standalone pages here makes CRXJS bundle them even though
-  // they are not "normal" manifest entry points. offscreen.html is created at
-  // runtime via chrome.offscreen.createDocument().
+  // Active-speaker scraper, injected into supported meeting clients. It reports
+  // speaker changes to the background worker, which joins them with the streamed
+  // word timestamps (see src/speaker/, src/transcript.ts).
+  content_scripts: [
+    {
+      matches: ['https://meet.google.com/*', 'https://*.zoom.us/*'],
+      js: ['src/speaker/index.ts'],
+      run_at: 'document_idle',
+    },
+  ],
+  // Declaring the standalone pages here makes CRXJS bundle them even though they
+  // are not "normal" manifest entry points. offscreen.html is created at runtime
+  // via chrome.offscreen.createDocument().
   web_accessible_resources: [
     {
       resources: ['src/offscreen.html', 'src/micsetup.html'],

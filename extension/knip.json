@@ -5,6 +5,7 @@
     "src/offscreen.ts",
     "src/popup.ts",
     "src/micsetup.ts",
+    "src/speaker/index.ts",
     "manifest.config.ts"
   ],
   "project": ["src/**/*.ts", "*.ts"],

@@ -1,67 +1,103 @@
 # Meeting Capture
 
-A small **Chrome (Manifest V3)** extension that captures the audio of whatever
-meeting tab you're on — **Zoom web client, Google Meet, Teams, Webex, anything
-that runs in a tab** — and POSTs the recording to a self-hosted
-[WhisperX](https://github.com/m-bain/whisperX) transcription service for
-transcription + diarization.
+A small **Chrome (Manifest V3)** extension that **streams** the audio of a
+meeting tab (**Google Meet, Zoom web client**) to a self-hosted **streaming ASR
+service** for live transcription, and labels the captions with **real speaker
+names** by reading the meeting UI's active-speaker indicator.
 
-It is deliberately a **thin capture client**. It only records and forwards audio.
-Transcription, alignment and speaker diarization live in a separate, reusable
+It is deliberately a **thin client**. It captures audio, streams it, and scrapes
+who's talking — transcription itself lives in a separate, reusable streaming
 service so the capture layer stays swappable.
 
 > Inspired by
 > [`recallai/chrome-recording-transcription-extension`](https://github.com/recallai/chrome-recording-transcription-extension).
-> This is **not a fork** — it's a fresh, audio-only, platform-agnostic rewrite
-> (Vite + CRXJS + TypeScript) that drops the Google-Meet caption scraper and
-> replaces the local download sink with an HTTP POST to a transcription service.
+> Built with Vite + CRXJS + TypeScript.
 
 ---
 
-## Architecture
+## How it works
+
+Two independent live signals are joined to produce a speaker-attributed
+transcript:
+
+1. **Audio → words.** The offscreen document taps the tab's audio with an
+   `AudioWorklet`, converts it to 16-bit PCM, and streams it over a **WebSocket**
+   to the ASR service, which streams back incremental text **with per-word
+   timestamps**.
+2. **Who's talking.** A content script in the meeting tab watches the active-
+   speaker indicator and reports `{ name, time }` changes.
+
+The background worker joins them by timestamp: each word is attributed to
+whoever was the active speaker when it was spoken. **Diarization is not done from
+the audio** — it reuses the meeting platform's own per-participant detection.
 
 ```mermaid
 flowchart LR
     subgraph chrome["Chrome — meeting tab"]
-        pop["popup<br/>(start / stop UI)"]
-        sw["service worker<br/>(orchestrator)"]
-        off["offscreen doc<br/>(capture engine)"]
-        mic["micsetup page<br/>(mic grant)"]
+        pop["popup<br/>(play-script UI)"]
+        sw["service worker<br/>(orchestrate + join)"]
+        off["offscreen doc<br/>(AudioWorklet PCM tap)"]
+        cs["content script<br/>(active-speaker scraper)"]
     end
 
-    subgraph svc["WhisperX service (separate)"]
-        pipe["transcribe → align →<br/>diarize (pyannote)"]
+    subgraph svc["streaming ASR service (separate)"]
+        asr["cache-aware streaming ASR<br/>(words + timestamps)"]
     end
 
-    pop -- "start / stop" --> sw
+    pop -- "start / stop / mic / debug" --> sw
     sw -- "tab stream id" --> off
-    mic -. "grants mic" .-> off
-
-    off == "POST audio/webm" ==> pipe
-    pipe == "{ language, segments:<br/>[ {speaker, start, end, text} ] }" ==> off
+    off == "WS: int16 PCM frames" ==> asr
+    asr == "{ text, words:[{word,start,end}] }" ==> off
+    off -- "words + captureStartEpoch" --> sw
+    cs -- "active speaker changed" --> sw
+    sw -- "join → segments" --> pop
 ```
 
-- **`src/background.ts`** — service worker. Brokers a tab `MediaStream` id via
-  `chrome.tabCapture.getMediaStreamId()`, spins up the offscreen document, and
-  tracks recording state.
-- **`src/offscreen.ts`** — the capture engine. Opens the tab (and optional mic)
-  stream, wires an `AudioContext` graph, records with `MediaRecorder`, and POSTs
-  the final `audio/webm` blob to the configured endpoint.
-- **`src/popup.{html,ts,css}`** — start/stop UI, mic + endpoint settings,
-  transcript display.
+### Why this shape
+
+Tab capture only gives you the **post-mix** stream — every remote participant is
+already blended into one track, so audio-only diarization can't tell them apart,
+caps out at a few speakers, and only ever emits anonymous `SPEAKER_00` labels.
+The meeting client, however, already computes who's speaking from each
+participant's individual mic and shows it in the UI **with their real name**.
+Scraping that sidesteps the whole problem: **real names, unlimited speakers, ~no
+extra compute** — at the cost of per-platform DOM selectors that need occasional
+tuning (see below).
+
+### Components
+
+- **`src/background.ts`** — service worker. Brokers the tab `MediaStream` id,
+  manages the offscreen doc, and **joins** the streamed words against the active-
+  speaker timeline into the speaker-attributed transcript (persisted in
+  `chrome.storage.local` so it survives the worker being torn down).
+- **`src/offscreen.ts`** + **`public/pcm-worklet.js`** — the capture engine. Wires
+  an `AudioContext` graph, taps PCM on the audio thread with an `AudioWorklet`,
+  and streams it over a WebSocket. The mic can be added/removed **mid-recording**.
+- **`src/speaker/`** — the active-speaker scraper (content script). `meet.ts` and
+  `zoom.ts` are per-platform adapters; `index.ts` wires the matching one and
+  reports changes; `transcript.ts` holds the timestamp-join logic.
+- **`src/popup.{html,ts,css}`** — start/stop, settings, and the live play-script
+  transcript (speaker legend + colour-coded turns).
 - **`src/micsetup.{html,ts}`** — one-time microphone permission grant (the
   offscreen doc can't show a prompt).
 
-### Why tab capture (and its one hard limit)
+### Active-speaker detection (the brittle part)
 
-`tabCapture` grabs whatever tab is active when you click the extension — it runs
-off the user gesture / `activeTab`, not off any meeting-host permission — so it
-works on any in-tab meeting with zero platform-specific code.
+These adapters read obfuscated meeting-client DOM, so expect to re-tune them.
 
-The ceiling: you only get the **post-mix** stream — every remote participant is
-already blended into one track. Per-participant separation is impossible from a
-tab capture; separating the remote side is pyannote's job in the service. Your
-own mic is the one voice you can cleanly isolate (see Roadmap).
+- **Google Meet** — Meet exposes no stable "speaking" marker (no tile attribute,
+  no CSS animation; every identifier is a hash it rotates every couple of
+  months). So detection is **token-independent**: the speaking tile's audio meter
+  animates, mutating its `class` far faster than idle tiles, so we tally visible
+  `class` mutations per `[data-participant-id]` tile and pick the busiest. Names
+  come from the (stable) name wrapper.
+- **Zoom web** — uses stable BEM classes; the active tile gets an `--active`
+  modifier, which is polled.
+
+Turn on **Debug** in the popup to log detection to the **meeting tab's** console
+(`[speaker] active: <name>` on change, plus a `{tiles, names, speaking}` dump).
+The service worker console gets `[bg] …` join logs and a `scribe.*` test API
+(`scribe.session()`, `scribe.inject('Name')`).
 
 ---
 
@@ -73,8 +109,7 @@ pnpm dev         # vite dev server with HMR
 ```
 
 Load it: open `chrome://extensions`, enable **Developer mode**, **Load
-unpacked**, and select the `dist/` directory (after a build) or the dev-served
-build per CRXJS instructions.
+unpacked**, and select the `dist/` directory (after a build).
 
 ## Build
 
@@ -82,7 +117,8 @@ build per CRXJS instructions.
 pnpm build       # writes ./dist
 ```
 
-Then **Load unpacked** → `./dist`.
+Then **Load unpacked** → `./dist`. After changes, hit the extension's reload
+icon, and **refresh the meeting tab** so the content script re-injects.
 
 ## Quality gates
 
@@ -94,8 +130,7 @@ pnpm icons       # regenerate icons (needs ImageMagick `magick` on PATH)
 ```
 
 Stack: pnpm, flat ESLint (typescript-eslint, unicorn, sonarjs, import-x,
-regexp, n), Prettier (single quotes), knip, with `minimumReleaseAge`
-supply-chain hygiene.
+regexp, n), Prettier (single quotes), knip.
 
 ## CI / Releases
 
@@ -130,84 +165,73 @@ Publishing to the Chrome Web Store is wired up but commented out in
 `release.yml` — enable it once a CWS listing exists and the `CWS_*` secrets are
 set.
 
-## Configure the endpoint
+## Configure the service
 
-Set the transcription endpoint in the popup (persisted via `chrome.storage`).
-Default: `https://whisperx.lalala.casa/transcribe`.
+Set the streaming ASR **WebSocket URL** in the popup (persisted via
+`chrome.storage`). Default: `wss://scribe.lalala.casa/ws`.
 
 To point it at a different host, set it in the popup **and** add that origin to
-`host_permissions` in `manifest.config.ts`, then rebuild — the offscreen fetch is
+`host_permissions` in `manifest.config.ts`, then rebuild — the WebSocket is
 blocked for any host not listed there. The deployed service and a local
-`localhost:8000` mock are pre-listed.
+`ws://localhost:8000` are pre-listed.
 
 ## Service contract
 
-The extension POSTs the raw recording and expects JSON back:
+The extension opens a WebSocket and speaks this protocol:
 
 ```
-POST <endpoint>
-Content-Type: audio/webm
-body: <audio/webm;codecs=opus bytes>
-
-200 OK
-{
-  "language": "en",
-  "segments": [
-    { "speaker": "SPEAKER_00", "start": 1.2, "end": 4.8, "text": "..." }
-  ]
-}
+→ (text)   {"sampleRate": 48000}          // once, on open
+→ (binary) <int16 LE mono PCM frames>      // continuously, at sampleRate
+← (text)   {"type":"partial",
+            "text":"the cumulative transcript so far",
+            "words":[{"word":"the","start":0.56,"end":1.12}, ...]}
 ```
 
-The service must send permissive CORS headers
-(`Access-Control-Allow-Origin`) so the offscreen page can read the response.
-The WhisperX service that satisfies this contract is maintained separately.
+`words[].start/end` are seconds from the start of the audio stream; the extension
+maps them to wall-clock via the capture-start time to align with the speaker
+timeline. A compatible streaming ASR service (NVIDIA NeMo cache-aware
+FastConformer) is maintained separately.
 
 ## Usage
 
-1. Start the transcription service.
-2. Join a meeting in a Chrome tab.
+1. Start the streaming ASR service and make its URL reachable from the browser.
+2. Join a meeting in a Chrome tab (Google Meet or Zoom web).
 3. Click the extension icon → optionally **Capture my microphone** (grant once
-   via the `grant access` link) → **Start recording**.
-4. **Stop** — the offscreen doc POSTs the audio and renders the returned
-   transcript.
-
-Inspect logs at `chrome://extensions` → this extension → **service worker** →
-_Inspect_ (look for `[offscreen]` messages).
+   via `grant access`; it can also be toggled live mid-recording) → **Start
+   recording**.
+4. Watch the transcript fill in, grouped by speaker. **Stop** when done.
 
 ---
 
 ## Gotchas
 
-| Symptom                                 | Cause / fix                                                                                                                                  |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Can't hear the meeting while recording  | Tab capture mutes the tab; the offscreen doc reconnects `tabSource → ctx.destination` to keep playback. If broken, that's the line to check. |
-| No mic in the recording                 | Grant via the `grant access` link (`micsetup.html`); also check OS-level mic permission for Chrome.                                          |
-| Audio freezes/gaps mid-recording        | You switched away from the meeting tab; Chrome throttles background tabs. Stay on the tab.                                                   |
-| "Offscreen not ready" / nothing records | Reload the extension in `chrome://extensions`.                                                                                               |
-| POST blocked (CORS or net)              | Add the endpoint origin to `host_permissions` and ensure the service returns `Access-Control-Allow-Origin`.                                  |
+| Symptom                                 | Cause / fix                                                                                                                                                                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Everyone shows as **`Unknown`**         | The active-speaker scraper isn't firing. Reload the extension **and refresh the meeting tab**; with Debug on, check the meeting tab console. If Meet rotated its DOM, the `[data-participant-id]`/name selectors in `speaker/meet.ts` may need a tweak. |
+| Can't hear the meeting while recording  | Tab capture mutes the tab; the offscreen doc reconnects `tabSource → ctx.destination` to keep playback. If broken, that's the line to check.                                                                                                            |
+| No mic in the recording                 | Grant via the `grant access` link (`micsetup.html`); also check OS-level mic permission for Chrome. The live toggle no-ops until granted.                                                                                                               |
+| Audio freezes/gaps mid-recording        | You switched away from the meeting tab; Chrome throttles background tabs. Stay on the tab.                                                                                                                                                              |
+| Nothing records / "offscreen not ready" | Reload the extension in `chrome://extensions`.                                                                                                                                                                                                          |
+| WebSocket won't connect                 | Add the service origin to `host_permissions` (`wss://…/*`), confirm the service is reachable, and that TLS validates.                                                                                                                                   |
 
 ---
 
 ## Roadmap
 
-- **Mic as a separate track** — upload tab + mic as two parts so pyannote only
-  separates the remote side and your own speech is perfectly attributed.
-- **Persist transcripts** in the service (JSON + rendered Markdown), keyed by
-  timestamp — keep the extension a dumb capture client.
-- **Live/streaming path** — tap the offscreen `AudioContext` with an
-  `AudioWorklet`, stream PCM over a WebSocket to a chunked decoder
-  (`faster-whisper` + `diart`), keeping the batch endpoint for the final pass.
-- **Lock down CORS / `host_permissions`** to the stable `chrome-extension://<id>`
-  origin once published.
+- **Transcript export** — copy / download the play-script (Markdown or JSON).
+- **Persist sessions** keyed by meeting/time.
+- **More platforms** — Teams/Webex adapters (the audio path is already platform-
+  agnostic; only the active-speaker selectors are per-platform).
+- **Lock down `host_permissions`** to the stable `chrome-extension://<id>` origin
+  once published.
 
 ### Known reliability ceiling
 
 MV3 forbids auto-starting capture without a user gesture, capture dies if the
-meeting tab is closed/refreshed, and background tab throttling can briefly
-freeze audio. For always-on, unattended, gap-free capture, move the capture
-layer to an in-meeting bot or desktop recorder — and keep this same WhisperX
-service as the transcription backend. The service is the durable asset; the
-capture layer is swappable.
+meeting tab is closed/refreshed, and background tab throttling can briefly freeze
+audio. For always-on, unattended capture, move the capture layer to an in-meeting
+bot or desktop recorder — and keep this same streaming service as the backend.
+The service is the durable asset; the capture layer is swappable.
 
 ## License
 

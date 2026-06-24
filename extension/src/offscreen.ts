@@ -1,41 +1,47 @@
 // The capture engine. Runs in an offscreen document so it has access to the
-// DOM APIs (getUserMedia, AudioContext, MediaRecorder) the service worker lacks.
+// DOM APIs (getUserMedia, AudioContext) the service worker lacks.
 //
 // IMPORTANT: offscreen documents can use chrome.runtime messaging ONLY — not
-// chrome.storage and not other extension APIs. So state transitions are sent to
-// the background worker (STATE_UPDATE), which persists them to storage.
+// chrome.storage. So status/transcript updates go to the background worker,
+// which owns storage and does the speaker join.
 //
-// Audio graph:
+// Audio graph (no MediaRecorder — we stream raw PCM):
 //
-//   tabStream ──▶ tabSource ──┬──▶ ctx.destination   (speakers: keep hearing it)
-//                             └──▶ recordDest ──▶ MediaRecorder
-//   micStream ──▶ micSource ─────▶ recordDest        (recorded, NOT to speakers)
+//   tabStream ─▶ tabSource ─┬─▶ ctx.destination   (speakers: keep hearing it)
+//                           └─▶ mix ─▶ pcmTap ─▶ ctx.destination (silent sink)
+//   micStream ─▶ micSource ───▶ mix              (mixed in, not to speakers)
 //
-// Capturing a tab mutes its audio for the user until you reconnect it to the
-// output. That `tabSource.connect(ctx.destination)` line is the unmute fix.
+//   pcmTap (AudioWorklet) posts Float32 blocks → int16 PCM → WebSocket → scribe
+//
+// The mic source can be added/removed mid-recording (setMic) by connecting to /
+// disconnecting from `mix`. Capturing a tab mutes its audio for the user until
+// you reconnect it to the output — that `tabSource.connect(ctx.destination)`
+// line is the unmute fix.
 
 import type { RecState } from './state';
-import type { Message, TranscriptResponse } from './types';
+import type { Message } from './types';
+import type { Word } from './transcript';
 
-const MIME_TYPE = 'audio/webm;codecs=opus';
-// WhisperX large-v3 + diarization on a GPU can take a while; allow a generous
-// window, but cap it so a genuinely hung request surfaces as an error rather
-// than leaving the UI in "finalizing" forever.
-const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+// The PCM tap worklet module (public/pcm-worklet.js, copied to the dist root).
+const WORKLET_URL = 'pcm-worklet.js';
+const WORKLET_NAME = 'pcm-tap';
 
 interface Session {
   ctx: AudioContext;
-  recorder: MediaRecorder;
+  ws: WebSocket;
+  node: AudioWorkletNode;
+  /** The summing node the tab + (optional) mic feed; the live mic add/remove point. */
+  mix: GainNode;
   tabStream: MediaStream;
   micStream: MediaStream | null;
-  chunks: Blob[];
-  endpoint: string;
-  saveRaw: boolean;
+  micSource: MediaStreamAudioSourceNode | null;
+  /** Wall-clock (epoch ms) of the first PCM sample sent — the join's time origin. */
+  captureStartEpoch: number | null;
+  debug: boolean;
 }
 
 let session: Session | null = null;
 
-// Report a state transition to the background worker, which owns chrome.storage.
 function sendState(patch: Partial<RecState>): void {
   chrome.runtime
     .sendMessage({
@@ -48,7 +54,7 @@ function sendState(patch: Partial<RecState>): void {
 
 // Chrome's tab capture reliably yields a usable audio track only when video is
 // requested alongside it — audio-only tab constraints frequently hand back a
-// silent/empty track. We request video for reliability but never record it.
+// silent track. We request video for reliability but never read it.
 function tabConstraints(
   streamId: string,
   withVideo: boolean,
@@ -76,121 +82,147 @@ async function captureTabStream(streamId: string): Promise<MediaStream> {
   }
 }
 
-// Logs the RMS level of a source every couple seconds — use it to confirm the
-// remote (tab) audio actually carries signal (rms > ~0.005 means sound).
-function attachLevelMeter(
-  ctx: AudioContext,
-  source: MediaStreamAudioSourceNode,
-  label: string,
-): void {
-  const analyser = ctx.createAnalyser();
-  analyser.fftSize = 256;
-  source.connect(analyser);
-  const buf = new Uint8Array(analyser.frequencyBinCount);
-  const id = setInterval(() => {
-    analyser.getByteTimeDomainData(buf);
-    let sum = 0;
-    for (const v of buf) {
-      const x = (v - 128) / 128;
-      sum += x * x;
-    }
-    console.log(
-      `[offscreen] ${label} level (rms): ${Math.sqrt(sum / buf.length).toFixed(3)}`,
-    );
-  }, 2000);
-  source.mediaStream
-    .getAudioTracks()[0]
-    ?.addEventListener('ended', () => clearInterval(id));
+// Mic permission must already be granted via the micsetup page; the offscreen
+// doc can't prompt. Returns null (and warns) if it isn't granted.
+async function openMicStream(): Promise<MediaStream | null> {
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+      video: false,
+    });
+  } catch (error) {
+    console.warn('[offscreen] mic capture failed', error);
+    return null;
+  }
+}
+
+// Float32 [-1,1] → little-endian int16 PCM. The scribe service resamples to
+// 16 kHz server-side, so we send at the AudioContext's native rate and just
+// declare it in the opening config message.
+function floatToInt16(input: Float32Array): ArrayBuffer {
+  const out = new Int16Array(input.length);
+  for (const [i, sample] of input.entries()) {
+    const s = Math.max(-1, Math.min(1, sample));
+    out[i] = s < 0 ? s * 32_768 : s * 32_767;
+  }
+  return out.buffer;
 }
 
 async function start(opts: {
   streamId: string;
   withMic: boolean;
-  endpoint: string;
-  saveRaw: boolean;
+  wsUrl: string;
+  debug: boolean;
 }): Promise<void> {
   if (session) return;
 
   try {
-    // Capture the tab (audio + video; we only record the audio). Requesting
-    // video is what makes the audio track actually carry the tab's sound.
     const tabStream = await captureTabStream(opts.streamId);
     const tabAudio = tabStream.getAudioTracks()[0];
-    if (!tabAudio) {
+    if (!tabAudio)
       throw new Error(
         'Tab capture returned no audio track — nothing to record.',
       );
-    }
     tabAudio.enabled = true;
-    console.log('[offscreen] tab audio track:', {
-      label: tabAudio.label,
-      muted: tabAudio.muted,
-      enabled: tabAudio.enabled,
-      settings: tabAudio.getSettings(),
-    });
 
-    let micStream: MediaStream | null = null;
-    if (opts.withMic) {
-      // Permission must already be granted via the micsetup page; the offscreen
-      // doc cannot show a prompt. If it wasn't granted this throws and we fall
-      // back to tab-only.
-      try {
-        micStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: false,
-            noiseSuppression: false,
-            autoGainControl: false,
-          },
-          video: false,
-        });
-      } catch (error) {
-        console.warn(
-          '[offscreen] mic capture failed, continuing tab-only',
-          error,
-        );
-        micStream = null;
-      }
-    }
+    const micStream = opts.withMic ? await openMicStream() : null;
 
     const ctx = new AudioContext();
     await ctx.resume().catch(() => {});
+    await ctx.audioWorklet.addModule(chrome.runtime.getURL(WORKLET_URL));
+
     const tabSource = ctx.createMediaStreamSource(new MediaStream([tabAudio]));
     tabSource.connect(ctx.destination); // unmute: user keeps hearing the meeting
-    attachLevelMeter(ctx, tabSource, 'TAB'); // diagnostic: is remote audio flowing?
 
-    const recordDest = ctx.createMediaStreamDestination();
-    tabSource.connect(recordDest);
-
+    // Mix tab (+ mic) down to a single node feeding the PCM tap.
+    const mix = ctx.createGain();
+    tabSource.connect(mix);
+    let micSource: MediaStreamAudioSourceNode | null = null;
     if (micStream) {
-      const micSource = ctx.createMediaStreamSource(micStream);
-      micSource.connect(recordDest); // recorded only — not routed to speakers
+      micSource = ctx.createMediaStreamSource(micStream);
+      micSource.connect(mix);
     }
 
-    const chunks: Blob[] = [];
-    const recorder = new MediaRecorder(recordDest.stream, {
-      mimeType: MediaRecorder.isTypeSupported(MIME_TYPE)
-        ? MIME_TYPE
-        : 'audio/webm',
+    // The worklet runs the PCM tap on the audio thread (replaces the deprecated
+    // ScriptProcessorNode). Route its (silent) output through a muted gain to the
+    // destination so the graph keeps pulling it without doubling the audio.
+    const node = new AudioWorkletNode(ctx, WORKLET_NAME, {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [1],
+    });
+    mix.connect(node);
+    const sink = ctx.createGain();
+    sink.gain.value = 0;
+    node.connect(sink).connect(ctx.destination);
+
+    const ws = new WebSocket(opts.wsUrl);
+    ws.binaryType = 'arraybuffer';
+
+    ws.addEventListener('open', () => {
+      ws.send(JSON.stringify({ sampleRate: ctx.sampleRate }));
+      if (opts.debug) console.log(`[offscreen] ws open @ ${ctx.sampleRate} Hz`);
     });
 
-    recorder.addEventListener('dataavailable', (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
+    ws.addEventListener('message', (e) => {
+      try {
+        const msg = JSON.parse(e.data as string) as {
+          type: string;
+          text?: string;
+          words?: Word[];
+        };
+        if (msg.type !== 'partial' || !session) return;
+        chrome.runtime
+          .sendMessage({
+            type: 'TRANSCRIPT_UPDATE',
+            target: 'background',
+            words: msg.words ?? [],
+            text: msg.text ?? '',
+            captureStartEpoch: session.captureStartEpoch ?? Date.now(),
+          } satisfies Message)
+          .catch(() => {});
+      } catch (error) {
+        console.warn('[offscreen] bad ws message', error);
+      }
     });
-    recorder.addEventListener('stop', () => void finalize());
 
-    recorder.start(1000); // gather a chunk per second so a crash loses ≤1s
+    ws.addEventListener('error', () => {
+      sendState({
+        status: 'idle',
+        error: `Cannot reach streaming service at ${opts.wsUrl}`,
+      });
+      teardown();
+    });
+    ws.addEventListener('close', () => {
+      if (session) sendState({ status: 'idle' });
+      teardown();
+    });
+
+    // Each message is a Float32 block of mixed mono audio from the worklet.
+    node.port.addEventListener('message', (e: MessageEvent) => {
+      if (!session || ws.readyState !== WebSocket.OPEN) return;
+      if (session.captureStartEpoch === null)
+        session.captureStartEpoch = Date.now();
+      ws.send(floatToInt16(e.data as Float32Array));
+    });
+    node.port.start();
 
     session = {
       ctx,
-      recorder,
+      ws,
+      node,
+      mix,
       tabStream,
       micStream,
-      chunks,
-      endpoint: opts.endpoint,
-      saveRaw: opts.saveRaw,
+      micSource,
+      captureStartEpoch: null,
+      debug: opts.debug,
     };
-
-    console.log(`[offscreen] recording started (mic: ${micStream !== null})`);
+    console.log(`[offscreen] streaming started (mic: ${micStream !== null})`);
     sendState({ status: 'recording' });
   } catch (error) {
     teardown();
@@ -200,81 +232,57 @@ async function start(opts: {
   }
 }
 
+// Add/remove the mic in the running graph when the toggle flips mid-recording.
+async function setMic(enabled: boolean): Promise<void> {
+  if (!session) return;
+
+  if (enabled && !session.micStream) {
+    const micStream = await openMicStream();
+    if (!micStream) return;
+    // The session may have ended while we awaited the mic permission.
+    if (!session) {
+      for (const t of micStream.getTracks()) t.stop();
+      return;
+    }
+    const micSource = session.ctx.createMediaStreamSource(micStream);
+    micSource.connect(session.mix);
+    session.micStream = micStream;
+    session.micSource = micSource;
+    console.log('[offscreen] mic added live');
+  } else if (!enabled && session.micStream) {
+    session.micSource?.disconnect();
+    for (const t of session.micStream.getTracks()) t.stop();
+    session.micStream = null;
+    session.micSource = null;
+    console.log('[offscreen] mic removed live');
+  }
+}
+
 function stop(): void {
   if (!session) return;
   console.log('[offscreen] stop requested');
-  sendState({ status: 'finalizing' });
-  // Triggers the recorder 'stop' event -> finalize().
-  session.recorder.stop();
-}
-
-async function finalize(): Promise<void> {
-  if (!session) return;
-  const { chunks, endpoint, saveRaw } = session;
-  const blob = new Blob(chunks, { type: 'audio/webm' });
-
-  if (saveRaw) saveLocally(blob);
+  // Closing the socket flushes the server; teardown stops the tracks/graph.
   teardown();
-
-  console.log(`[offscreen] finalize: ${blob.size} bytes -> ${endpoint}`);
-
-  if (blob.size === 0) {
-    sendState({
-      status: 'idle',
-      error:
-        'Captured 0 bytes — no tab audio was recorded. Make sure the tab is actually playing sound.',
-    });
-    return;
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
-  try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'audio/webm' },
-      body: blob,
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      const suffix = detail ? `: ${detail.slice(0, 200)}` : '';
-      throw new Error(`service responded ${res.status}${suffix}`);
-    }
-    const transcript = (await res.json()) as TranscriptResponse;
-    console.log(
-      `[offscreen] transcript: ${transcript.segments?.length ?? 0} segments`,
-    );
-    sendState({ status: 'idle', transcript, bytes: blob.size });
-  } catch (error) {
-    let message: string;
-    if (controller.signal.aborted) {
-      message = `Transcription timed out after ${UPLOAD_TIMEOUT_MS / 1000}s`;
-    } else {
-      message = error instanceof Error ? error.message : String(error);
-    }
-    console.error('[offscreen] transcription POST failed:', message);
-    sendState({ status: 'idle', error: message, bytes: blob.size });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function saveLocally(blob: Blob): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `meeting-capture-${Date.now()}.webm`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  sendState({ status: 'idle' });
 }
 
 function teardown(): void {
   if (!session) return;
-  for (const t of session.tabStream.getTracks()) t.stop();
-  for (const t of session.micStream?.getTracks() ?? []) t.stop();
-  session.ctx.close().catch(() => {});
-  session = null;
+  const s = session;
+  session = null; // null first so the close handler doesn't re-enter
+  try {
+    s.node.disconnect();
+  } catch {
+    /* already gone */
+  }
+  if (
+    s.ws.readyState === WebSocket.OPEN ||
+    s.ws.readyState === WebSocket.CONNECTING
+  )
+    s.ws.close();
+  for (const t of s.tabStream.getTracks()) t.stop();
+  for (const t of s.micStream?.getTracks() ?? []) t.stop();
+  s.ctx.close().catch(() => {});
 }
 
 chrome.runtime.onMessage.addListener((message: Message) => {
@@ -282,6 +290,10 @@ chrome.runtime.onMessage.addListener((message: Message) => {
   switch (message.type) {
     case 'OFFSCREEN_START': {
       void start(message);
+      break;
+    }
+    case 'OFFSCREEN_SET_MIC': {
+      void setMic(message.enabled);
       break;
     }
     case 'OFFSCREEN_STOP': {

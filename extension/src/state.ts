@@ -1,19 +1,19 @@
 // Durable recording state in chrome.storage.local — the single source of truth
-// the popup reflects. Using storage (not in-memory background state + live
-// messages) means the UI survives the popup being closed and the service worker
-// being torn down mid-transcription: reopen the popup and you still see the
-// final transcript or error.
+// the popup reflects. Using storage (not in-memory background state) means the
+// UI survives the popup being closed and the service worker being torn down
+// mid-stream: reopen the popup and the live transcript is still there.
 
-import type { RecordingStatus, TranscriptResponse } from './types';
+import type { RecordingStatus } from './types';
+import type { Segment } from './transcript';
 
 export interface RecState {
   status: RecordingStatus;
-  /** Present once a transcription has come back. Cleared on the next start. */
-  transcript?: TranscriptResponse;
+  /** Speaker-attributed transcript, recomputed live as words + speaker events arrive. */
+  segments?: Segment[];
+  /** Cumulative un-attributed ASR text — shown before any speaker events land. */
+  rawText?: string;
   /** Present when the last run failed. Cleared on the next start. */
   error?: string;
-  /** Size of the last recording POSTed, for debugging empty captures. */
-  bytes?: number;
   updatedAt: number;
 }
 
