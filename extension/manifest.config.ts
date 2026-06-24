@@ -22,12 +22,11 @@ export default defineManifest({
   },
   permissions: ['tabCapture', 'offscreen', 'storage', 'activeTab', 'tabs'],
   // The transcription service endpoints the offscreen doc is allowed to POST to.
-  // Add your own (e.g. the praesidium Tailscale MagicDNS name) here.
+  // Add your own here; the offscreen fetch is blocked for any host not listed.
   host_permissions: [
-    'http://localhost:8000/*',
+    'https://whisperx.lalala.casa/*', // deployed WhisperX service
+    'http://localhost:8000/*', // local mock / dev service
     'http://127.0.0.1:8000/*',
-    'http://praesidium:8000/*',
-    'http://praesidium.gecko-bonito.ts.net:8000/*',
   ],
   // Declaring the standalone pages here makes CRXJS bundle them even though
   // they are not "normal" manifest entry points. offscreen.html is created at

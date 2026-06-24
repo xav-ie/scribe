@@ -10,7 +10,7 @@ export interface Settings {
 }
 
 const DEFAULT_SETTINGS: Settings = {
-  endpoint: 'http://localhost:8000/transcribe',
+  endpoint: 'https://whisperx.lalala.casa/transcribe',
   withMic: false,
   saveRaw: false,
 };

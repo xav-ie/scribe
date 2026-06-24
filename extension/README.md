@@ -133,11 +133,12 @@ set.
 ## Configure the endpoint
 
 Set the transcription endpoint in the popup (persisted via `chrome.storage`).
-Default: `http://localhost:8000/transcribe`.
+Default: `https://whisperx.lalala.casa/transcribe`.
 
-If you point it at a non-localhost host (e.g. the `praesidium` GPU box over
-Tailscale), add that origin to `host_permissions` in `manifest.config.ts` and
-rebuild — a few common ones are pre-listed there.
+To point it at a different host, set it in the popup **and** add that origin to
+`host_permissions` in `manifest.config.ts`, then rebuild — the offscreen fetch is
+blocked for any host not listed there. The deployed service and a local
+`localhost:8000` mock are pre-listed.
 
 ## Service contract
 
