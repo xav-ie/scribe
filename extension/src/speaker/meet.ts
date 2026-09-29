@@ -116,17 +116,20 @@ export const meetAdapter: SpeakerAdapter = {
   // The toolbar mic toggle. Meet sets data-is-muted on it (also on the camera
   // button, so we match the one whose aria-label mentions the microphone). The
   // aria-label flips between "Turn on/off microphone" as a fallback signal.
+  // Other microphone-labelled controls (device pickers) are ignored.
   // ⚠️ TUNE ME if Meet changes these — null means "don't gate the mic".
   isMuted(): boolean | null {
     const labelled = [
       ...document.querySelectorAll<HTMLElement>('[aria-label*="microphone" i]'),
     ];
-    const btn =
-      labelled.find((el) => el.dataset.isMuted !== undefined) ?? labelled[0];
-    if (!btn) return null;
-    const flag = btn.dataset.isMuted;
+    const flag = labelled.find((el) => el.dataset.isMuted !== undefined)
+      ?.dataset.isMuted;
     if (flag !== undefined) return flag === 'true';
-    return /turn on microphone/i.test(btn.getAttribute('aria-label') ?? '');
+    const label = labelled
+      .map((el) => el.getAttribute('aria-label') ?? '')
+      .find((l) => /turn (?:on|off) microphone/i.test(l));
+    if (label === undefined) return null;
+    return /turn on microphone/i.test(label);
   },
 
   diagnose(): SpeakerDiagnostics {

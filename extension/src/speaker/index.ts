@@ -1,8 +1,9 @@
 // Content script: runs in the meeting tab, detects active-speaker changes AND
 // the local user's own mute state via the matching platform adapter, and reports
-// both to the background worker. The background joins speaker changes against the
-// streamed word timestamps, and gates the mic stream on the mute state — so all
-// the brittle DOM logic is quarantined here and in the adapters.
+// them: speaker changes to the background worker, which joins them against the
+// streamed word timestamps, and mute state straight to the offscreen document,
+// which gates the mic stream on it — so all the brittle DOM logic is quarantined
+// here and in the adapters.
 
 import { dlog, expose, setDebug } from '../debug';
 import type { Message } from '../types';
@@ -39,31 +40,33 @@ if (adapter) {
 
   adapter.start(emit);
 
-  // Poll the local user's mute state and report changes; the background streams
+  // Poll the local user's mute state and report changes; the offscreen streams
   // silence (no recording) while muted. null = can't detect → don't gate.
   let lastMuted: boolean | null = null;
-  setInterval(() => {
+  const reportMuted = (): void => {
     const muted = adapter.isMuted?.() ?? null;
-    if (muted !== null && muted !== lastMuted) {
-      lastMuted = muted;
-      dlog('[speaker] muted:', muted);
-      chrome.runtime
-        .sendMessage({
-          type: 'MUTE_STATE',
-          target: 'background',
-          muted,
-        } satisfies Message)
-        .catch(() => {});
-    }
-  }, 500);
+    if (muted === null || muted === lastMuted) return;
+    lastMuted = muted;
+    dlog('[speaker] muted:', muted);
+    chrome.runtime
+      .sendMessage({
+        type: 'MUTE_STATE',
+        target: 'offscreen',
+        muted,
+      } satisfies Message)
+      .catch(() => {});
+  };
+  setInterval(reportMuted, 500);
 
   // A fresh recording resets the timeline; re-emit the current speaker + mute
-  // state so both are seeded from the start (force past the dedupe).
+  // state so both are seeded from the start (force past the dedupe). Mute is
+  // reported immediately, before the mic stream finishes opening.
   chrome.runtime.onMessage.addListener((message: Message) => {
     if (message.target === 'content' && message.type === 'RESET_SPEAKER') {
       const current = last;
       last = null;
       lastMuted = null;
+      reportMuted();
       if (current) emit(current);
     }
   });

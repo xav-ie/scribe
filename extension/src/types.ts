@@ -8,6 +8,7 @@
 //   offscreen ──TRANSCRIPT_UPDATE──▶ background   (streamed words)
 //   content  ──SPEAKER_EVENT───────▶ background   (active-speaker changes)
 //   offscreen ──STATE_UPDATE───────▶ background   (status/error)
+//   content  ──MUTE_STATE──────────▶ offscreen    (gates the mic stream)
 
 import type { RecState } from './state';
 import type { Word } from './transcript';
@@ -72,17 +73,11 @@ interface SpeakerEvent {
   atEpoch: number;
 }
 
-// content script -> background: the local user's own mic mute state changed.
+// content script -> offscreen: the local user's own mic mute state. While muted,
+// the offscreen sends silence instead of mic audio, so muted self-talk never
+// leaves the machine.
 interface MuteState {
   type: 'MUTE_STATE';
-  target: 'background';
-  muted: boolean;
-}
-
-// background -> offscreen: gate the mic stream. While muted, the offscreen sends
-// silence instead of mic audio, so muted self-talk never leaves the machine.
-interface MicMuted {
-  type: 'OFFSCREEN_MIC_MUTED';
   target: 'offscreen';
   muted: boolean;
 }
@@ -105,7 +100,6 @@ export type Message =
   | TranscriptUpdate
   | SpeakerEvent
   | MuteState
-  | MicMuted
   | ResetSpeaker;
 
 export type RecordingStatus = 'idle' | 'recording';

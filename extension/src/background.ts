@@ -11,7 +11,12 @@
 import { getSettings } from './config';
 import { dlog, expose, setDebug } from './debug';
 import { getState, setState } from './state';
-import { mergeTranscript, type SpeakerSpan, type Word } from './transcript';
+import {
+  mergeTranscript,
+  type Channel,
+  type SpeakerSpan,
+  type Word,
+} from './transcript';
 import type { Message } from './types';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
@@ -26,8 +31,8 @@ interface JoinSession {
   timeline: SpeakerSpan[];
   tabWords: Word[];
   tabEpoch: number | null;
-  micWords: Word[];
-  micEpoch: number | null;
+  /** One entry per mic stream: toggling the mic off and on opens a new one. */
+  mic: Channel[];
   rawText: string;
 }
 
@@ -36,8 +41,7 @@ const EMPTY_SESSION: JoinSession = {
   timeline: [],
   tabWords: [],
   tabEpoch: null,
-  micWords: [],
-  micEpoch: null,
+  mic: [],
   rawText: '',
 };
 
@@ -88,7 +92,7 @@ async function ensureOffscreenDocument(): Promise<void> {
 async function recompute(s: JoinSession): Promise<void> {
   const segments = mergeTranscript(
     { words: s.tabWords, epoch: s.tabEpoch },
-    { words: s.micWords, epoch: s.micEpoch },
+    s.mic,
     s.timeline,
     MIC_SPEAKER,
   );
@@ -148,10 +152,6 @@ async function startRecording(): Promise<void> {
       target: 'content',
     } satisfies Message)
     .catch(() => {});
-
-  // Seed the offscreen with the last-known mute state; the content script
-  // re-reports the live value momentarily (see RESET_SPEAKER handling).
-  relayMuted(lastMuted).catch(() => {});
 }
 
 async function stopRecording(): Promise<void> {
@@ -178,7 +178,13 @@ async function onTranscriptUpdate(
   if (!s.active) return;
   const next: JoinSession =
     channel === 'mic'
-      ? { ...s, micWords: words, micEpoch: captureStartEpoch }
+      ? {
+          ...s,
+          mic: [
+            ...s.mic.filter((c) => c.epoch !== captureStartEpoch),
+            { words, epoch: captureStartEpoch },
+          ],
+        }
       : { ...s, tabWords: words, tabEpoch: captureStartEpoch, rawText: text };
   await saveSession(next);
   await recompute(mem!);
@@ -236,10 +242,6 @@ chrome.runtime.onMessage.addListener((message: Message) => {
       onSpeakerEvent(message.name, message.atEpoch).catch(() => {});
       break;
     }
-    case 'MUTE_STATE': {
-      relayMuted(message.muted).catch(() => {});
-      break;
-    }
   }
 });
 
@@ -273,23 +275,6 @@ async function relayMic(enabled: boolean): Promise<void> {
       type: 'OFFSCREEN_SET_MIC',
       target: 'offscreen',
       enabled,
-    } satisfies Message)
-    .catch(() => {});
-}
-
-// The local user's last-reported mute state (default unmuted → recorded). When
-// muted, the offscreen streams silence so self-talk isn't captured.
-let lastMuted = false;
-
-async function relayMuted(muted: boolean): Promise<void> {
-  lastMuted = muted;
-  const { status } = await getState();
-  if (status !== 'recording') return;
-  chrome.runtime
-    .sendMessage({
-      type: 'OFFSCREEN_MIC_MUTED',
-      target: 'offscreen',
-      muted,
     } satisfies Message)
     .catch(() => {});
 }

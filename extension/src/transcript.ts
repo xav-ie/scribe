@@ -59,14 +59,14 @@ function speakerAt(timeline: readonly SpeakerSpan[], epoch: number): string {
 
 /**
  * Merge the tab stream (attributed via the active-speaker timeline) and the mic
- * stream (always the local user) into one time-ordered, speaker-grouped script.
+ * streams (always the local user) into one time-ordered, speaker-grouped script.
  * Each word is stamped with its wall-clock time (`epoch + wordSeconds*1000`) so
  * the two independently-timed streams interleave correctly; `start`/`end` on the
  * returned segments are seconds from the first word.
  */
 export function mergeTranscript(
   tab: Channel,
-  mic: Channel,
+  mic: readonly Channel[],
   timeline: readonly SpeakerSpan[],
   micName: string,
   leadMs: number = DEFAULT_SPEAKER_LEAD_MS,
@@ -82,9 +82,10 @@ export function mergeTranscript(
       });
     }
   }
-  if (mic.epoch !== null) {
-    for (const w of mic.words) {
-      const at = mic.epoch + ((w.start + w.end) / 2) * 1000;
+  for (const stream of mic) {
+    if (stream.epoch === null) continue;
+    for (const w of stream.words) {
+      const at = stream.epoch + ((w.start + w.end) / 2) * 1000;
       stamped.push({ at, speaker: micName, word: w.word });
     }
   }

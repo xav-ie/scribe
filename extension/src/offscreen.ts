@@ -42,13 +42,16 @@ interface Session {
   micStream: MediaStream | null;
   tab: Channel;
   mic: Channel | null;
-  /** While true, the mic streams silence — you're muted, so it isn't recorded. */
-  micMuted: boolean;
   wsUrl: string;
   debug: boolean;
 }
 
 let session: Session | null = null;
+
+// While true, the mic streams silence — you're muted, so it isn't recorded.
+// Lives outside the session so a report that lands while start() is still
+// awaiting capture isn't lost.
+let micMuted = false;
 
 function sendState(patch: Partial<RecState>): void {
   chrome.runtime
@@ -91,12 +94,14 @@ async function captureTabStream(streamId: string): Promise<MediaStream> {
 }
 
 // Mic permission must already be granted via the micsetup page; the offscreen
-// doc can't prompt. Returns null (and warns) if it isn't granted.
+// doc can't prompt. Returns null (and warns) if it isn't granted. Echo
+// cancellation keeps meeting audio from the speakers out of the mic stream,
+// which would otherwise transcribe remote speech a second time as "Me".
 async function openMicStream(): Promise<MediaStream | null> {
   try {
     return await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: false,
+        echoCancellation: true,
         noiseSuppression: false,
         autoGainControl: false,
       },
@@ -214,7 +219,7 @@ function openChannel(
     // While muted, stream silence on the mic channel: your voice never leaves
     // the machine and isn't transcribed, but the stream stays time-aligned.
     const pcm =
-      channelName === 'mic' && session.micMuted
+      channelName === 'mic' && micMuted
         ? new Int16Array(data.length).buffer
         : floatToInt16(data);
     ws.send(pcm);
@@ -278,6 +283,9 @@ async function start(opts: {
   debug: boolean;
 }): Promise<void> {
   if (session) return;
+  // The offscreen doc outlives recordings; the content script re-reports the
+  // live value right after this, unless it can't detect one.
+  micMuted = false;
 
   try {
     const tabStream = await captureTabStream(opts.streamId);
@@ -301,7 +309,6 @@ async function start(opts: {
       micStream: null,
       tab: openChannel(ctx, tabSource, opts.wsUrl, 'tab', opts.debug, true),
       mic: null,
-      micMuted: false,
       wsUrl: opts.wsUrl,
       debug: opts.debug,
     };
@@ -348,8 +355,8 @@ chrome.runtime.onMessage.addListener((message: Message) => {
       void setMic(message.enabled);
       break;
     }
-    case 'OFFSCREEN_MIC_MUTED': {
-      if (session) session.micMuted = message.muted;
+    case 'MUTE_STATE': {
+      micMuted = message.muted;
       break;
     }
     case 'OFFSCREEN_STOP': {
