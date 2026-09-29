@@ -24,6 +24,12 @@ export interface SpeakerAdapter {
    * stop function.
    */
   start(onSpeaker: (name: string) => void): () => void;
+  /**
+   * The local user's own mic mute state from the meeting toolbar, or null if it
+   * can't be determined (in which case the mic isn't gated). Used to avoid
+   * recording your own muted self-talk.
+   */
+  isMuted?(): boolean | null;
   /** Snapshot for debug logging while tuning selectors. */
   diagnose(): SpeakerDiagnostics;
 }

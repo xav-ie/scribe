@@ -57,6 +57,8 @@ interface OffscreenSetMic {
 interface TranscriptUpdate {
   type: 'TRANSCRIPT_UPDATE';
   target: 'background';
+  /** Which ASR stream this is from — the tab audio, or the local mic. */
+  channel: 'tab' | 'mic';
   words: Word[];
   text: string;
   captureStartEpoch: number;
@@ -68,6 +70,21 @@ interface SpeakerEvent {
   target: 'background';
   name: string;
   atEpoch: number;
+}
+
+// content script -> background: the local user's own mic mute state changed.
+interface MuteState {
+  type: 'MUTE_STATE';
+  target: 'background';
+  muted: boolean;
+}
+
+// background -> offscreen: gate the mic stream. While muted, the offscreen sends
+// silence instead of mic audio, so muted self-talk never leaves the machine.
+interface MicMuted {
+  type: 'OFFSCREEN_MIC_MUTED';
+  target: 'offscreen';
+  muted: boolean;
 }
 
 // background -> content script (the captured tab): a new recording started, so
@@ -87,6 +104,8 @@ export type Message =
   | OffscreenSetMic
   | TranscriptUpdate
   | SpeakerEvent
+  | MuteState
+  | MicMuted
   | ResetSpeaker;
 
 export type RecordingStatus = 'idle' | 'recording';

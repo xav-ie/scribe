@@ -1,8 +1,8 @@
-// Content script: runs in the meeting tab, detects active-speaker changes via
-// the matching platform adapter, and reports them to the background worker. The
-// background joins these against the streamed word timestamps to produce a
-// speaker-attributed transcript (see transcript.ts) — so all the brittle DOM
-// logic is quarantined here and in the adapters.
+// Content script: runs in the meeting tab, detects active-speaker changes AND
+// the local user's own mute state via the matching platform adapter, and reports
+// both to the background worker. The background joins speaker changes against the
+// streamed word timestamps, and gates the mic stream on the mute state — so all
+// the brittle DOM logic is quarantined here and in the adapters.
 
 import { dlog, expose, setDebug } from '../debug';
 import type { Message } from '../types';
@@ -39,12 +39,31 @@ if (adapter) {
 
   adapter.start(emit);
 
-  // A fresh recording resets the timeline; re-emit the current speaker so it's
-  // seeded from the first word (force past the dedupe by clearing `last`).
+  // Poll the local user's mute state and report changes; the background streams
+  // silence (no recording) while muted. null = can't detect → don't gate.
+  let lastMuted: boolean | null = null;
+  setInterval(() => {
+    const muted = adapter.isMuted?.() ?? null;
+    if (muted !== null && muted !== lastMuted) {
+      lastMuted = muted;
+      dlog('[speaker] muted:', muted);
+      chrome.runtime
+        .sendMessage({
+          type: 'MUTE_STATE',
+          target: 'background',
+          muted,
+        } satisfies Message)
+        .catch(() => {});
+    }
+  }, 500);
+
+  // A fresh recording resets the timeline; re-emit the current speaker + mute
+  // state so both are seeded from the start (force past the dedupe).
   chrome.runtime.onMessage.addListener((message: Message) => {
     if (message.target === 'content' && message.type === 'RESET_SPEAKER') {
       const current = last;
       last = null;
+      lastMuted = null;
       if (current) emit(current);
     }
   });
@@ -59,11 +78,11 @@ if (adapter) {
   // Console test API (run in the meeting tab; if it's undefined in the console,
   // switch the console's JS context to this content script):
   //   speakerProbe.diagnose()    tiles/names the adapter currently sees
-  //   speakerProbe.current()     last detected speaker
+  //   speakerProbe.muted()       current detected mute state
   //   speakerProbe.emit('Bob')   manually fire a speaker change
   expose('speakerProbe', {
     diagnose: () => adapter.diagnose(),
-    current: () => last,
+    muted: () => adapter.isMuted?.() ?? null,
     emit: (name: string) => emit(name),
   });
 

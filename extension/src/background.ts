@@ -1,35 +1,43 @@
-// Service worker: orchestrates capture AND joins the two live streams —
-// streamed ASR words (from the offscreen doc) and active-speaker changes (from
-// the content script) — into a speaker-attributed transcript it persists for the
-// popup. It owns no audio itself; it brokers a tab MediaStream id to the
-// offscreen document.
+// Service worker: orchestrates capture AND joins the live streams into a
+// speaker-attributed transcript it persists for the popup. It owns no audio
+// itself; it brokers a tab MediaStream id to the offscreen document.
 //
-// The join inputs live in chrome.storage.local (joinSession) as well as an
-// in-memory cache, so a streamed word or speaker event arriving after the worker
-// was torn down still reconstructs the full transcript.
+// Two ASR streams arrive: the TAB audio (remote participants — attributed via
+// the active-speaker timeline from the content script) and the local MIC (always
+// the user). They're merged by wall-clock time. The join inputs live in
+// chrome.storage.local (joinSession) + an in-memory cache, so a streamed word or
+// speaker event arriving after the worker was torn down still reconstructs.
 
 import { getSettings } from './config';
 import { dlog, expose, setDebug } from './debug';
 import { getState, setState } from './state';
-import { joinTranscript, type SpeakerSpan, type Word } from './transcript';
+import { mergeTranscript, type SpeakerSpan, type Word } from './transcript';
 import type { Message } from './types';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
 const SESSION_KEY = 'joinSession';
 
+// The local mic is always attributed to the user — it's the one voice we can
+// label with certainty, even while muted. (Make this their name if preferred.)
+const MIC_SPEAKER = 'Me';
+
 interface JoinSession {
   active: boolean;
   timeline: SpeakerSpan[];
-  captureStartEpoch: number | null;
-  words: Word[];
+  tabWords: Word[];
+  tabEpoch: number | null;
+  micWords: Word[];
+  micEpoch: number | null;
   rawText: string;
 }
 
 const EMPTY_SESSION: JoinSession = {
   active: false,
   timeline: [],
-  captureStartEpoch: null,
-  words: [],
+  tabWords: [],
+  tabEpoch: null,
+  micWords: [],
+  micEpoch: null,
   rawText: '',
 };
 
@@ -76,12 +84,14 @@ async function ensureOffscreenDocument(): Promise<void> {
 }
 
 // Recompute the attributed transcript from the current join inputs and persist
-// it for the popup. Before any word timestamps exist there's nothing to attribute.
+// it for the popup.
 async function recompute(s: JoinSession): Promise<void> {
-  const segments =
-    s.captureStartEpoch === null
-      ? []
-      : joinTranscript(s.words, s.captureStartEpoch, s.timeline);
+  const segments = mergeTranscript(
+    { words: s.tabWords, epoch: s.tabEpoch },
+    { words: s.micWords, epoch: s.micEpoch },
+    s.timeline,
+    MIC_SPEAKER,
+  );
   dlog('[bg] recompute:', segments.length, 'segments | distinct speakers:', [
     ...new Set(segments.map((x) => x.speaker)),
   ]);
@@ -138,6 +148,10 @@ async function startRecording(): Promise<void> {
       target: 'content',
     } satisfies Message)
     .catch(() => {});
+
+  // Seed the offscreen with the last-known mute state; the content script
+  // re-reports the live value momentarily (see RESET_SPEAKER handling).
+  relayMuted(lastMuted).catch(() => {});
 }
 
 async function stopRecording(): Promise<void> {
@@ -155,13 +169,18 @@ async function stopRecording(): Promise<void> {
 }
 
 async function onTranscriptUpdate(
+  channel: 'tab' | 'mic',
   words: Word[],
   text: string,
   captureStartEpoch: number,
 ): Promise<void> {
   const s = await session();
   if (!s.active) return;
-  await saveSession({ ...s, words, rawText: text, captureStartEpoch });
+  const next: JoinSession =
+    channel === 'mic'
+      ? { ...s, micWords: words, micEpoch: captureStartEpoch }
+      : { ...s, tabWords: words, tabEpoch: captureStartEpoch, rawText: text };
+  await saveSession(next);
   await recompute(mem!);
 }
 
@@ -206,6 +225,7 @@ chrome.runtime.onMessage.addListener((message: Message) => {
     }
     case 'TRANSCRIPT_UPDATE': {
       onTranscriptUpdate(
+        message.channel,
         message.words,
         message.text,
         message.captureStartEpoch,
@@ -214,6 +234,10 @@ chrome.runtime.onMessage.addListener((message: Message) => {
     }
     case 'SPEAKER_EVENT': {
       onSpeakerEvent(message.name, message.atEpoch).catch(() => {});
+      break;
+    }
+    case 'MUTE_STATE': {
+      relayMuted(message.muted).catch(() => {});
       break;
     }
   }
@@ -253,6 +277,23 @@ async function relayMic(enabled: boolean): Promise<void> {
     .catch(() => {});
 }
 
+// The local user's last-reported mute state (default unmuted → recorded). When
+// muted, the offscreen streams silence so self-talk isn't captured.
+let lastMuted = false;
+
+async function relayMuted(muted: boolean): Promise<void> {
+  lastMuted = muted;
+  const { status } = await getState();
+  if (status !== 'recording') return;
+  chrome.runtime
+    .sendMessage({
+      type: 'OFFSCREEN_MIC_MUTED',
+      target: 'offscreen',
+      muted,
+    } satisfies Message)
+    .catch(() => {});
+}
+
 // --- debug + live settings ----------------------------------------------
 // Keep the debug flag in sync with the popup toggle (no reload needed), and
 // relay the mic toggle to a live recording.
@@ -270,7 +311,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // Console test API — run from the service-worker DevTools console
 // (chrome://extensions → this extension → "service worker" → Inspect):
-//   await scribe.session()   inspect the live timeline / words / captureStartEpoch
+//   await scribe.session()   inspect the live timeline / words / epochs
 //   await scribe.state()     the persisted RecState (segments the popup shows)
 //   scribe.inject('Alice')   fake an active-speaker change — proves the join works
 //                            independently of DOM detection
