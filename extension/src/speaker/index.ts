@@ -7,11 +7,13 @@
 
 import { dlog, expose, setDebug } from '../debug';
 import type { Message } from '../types';
+import { domProbe } from './dom';
 import { meetAdapter } from './meet';
 import { zoomAdapter } from './zoom';
 import type { SpeakerAdapter } from './types';
 
 const ADAPTERS: readonly SpeakerAdapter[] = [meetAdapter, zoomAdapter];
+const MAX_PROBES = 6;
 const adapter = ADAPTERS.find((a) => a.matches(location.host));
 
 // CRXJS's loader imports this module, which runs once per page context, then
@@ -92,13 +94,21 @@ function start(adapter: SpeakerAdapter): void {
 
   // Snapshot the adapter's view every 10s into the session (the background keeps
   // it only while recording), so debug bundles show what detection saw.
+  // While no tiles are found (selectors stale, or the UI moved into a frame),
+  // the first few snapshots also carry a page map to re-tune them from.
+  let probes = 0;
   setInterval(() => {
+    const diag = adapter.diagnose();
+    if (diag.tiles === 0 && probes < MAX_PROBES) {
+      probes += 1;
+      diag.probe = domProbe();
+    }
     chrome.runtime
       .sendMessage({
         type: 'SPEAKER_DIAG',
         target: 'background',
         platform: adapter.platform,
-        diag: adapter.diagnose(),
+        diag,
         atEpoch: Date.now(),
       } satisfies Message)
       .catch(() => {});

@@ -4,6 +4,8 @@
 // because these selectors are the most brittle part of the system — meeting
 // clients ship obfuscated, shifting class names, so expect to re-tune them.
 
+import type { DomProbe } from './dom';
+
 export interface SpeakerDiagnostics {
   /** How many participant tiles the adapter found. */
   tiles: number;
@@ -11,6 +13,8 @@ export interface SpeakerDiagnostics {
   names: string[];
   /** Who it currently thinks is speaking, or null. */
   speaking: string | null;
+  /** Page map attached while the adapter finds no tiles (see domProbe). */
+  probe?: DomProbe;
 }
 
 export interface SpeakerAdapter {
