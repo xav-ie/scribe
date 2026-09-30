@@ -7,12 +7,15 @@ export interface Settings {
   withMic: boolean;
   /** Log active-speaker detection + streaming diagnostics to the console. */
   debug: boolean;
+  /** Ask the streaming service to keep the audio it receives, per session. */
+  saveAudio: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
   wsUrl: 'wss://scribe.lalala.casa/ws',
   withMic: false,
   debug: false,
+  saveAudio: false,
 };
 
 export async function getSettings(): Promise<Settings> {

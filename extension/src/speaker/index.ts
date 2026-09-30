@@ -78,6 +78,20 @@ if (adapter) {
     2000,
   );
 
+  // Snapshot the adapter's view every 10s into the session (the background keeps
+  // it only while recording), so debug bundles show what detection saw.
+  setInterval(() => {
+    chrome.runtime
+      .sendMessage({
+        type: 'SPEAKER_DIAG',
+        target: 'background',
+        platform: adapter.platform,
+        diag: adapter.diagnose(),
+        atEpoch: Date.now(),
+      } satisfies Message)
+      .catch(() => {});
+  }, 10_000);
+
   // Console test API (run in the meeting tab; if it's undefined in the console,
   // switch the console's JS context to this content script):
   //   speakerProbe.diagnose()    tiles/names the adapter currently sees

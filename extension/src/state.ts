@@ -18,6 +18,8 @@ export interface RecState {
 }
 
 const KEY = 'recState';
+/** chrome.storage.local key of the background's join inputs (see background.ts). */
+export const JOIN_SESSION_KEY = 'joinSession';
 const INITIAL: RecState = { status: 'idle', updatedAt: 0 };
 
 export async function getState(): Promise<RecState> {

@@ -1,5 +1,10 @@
 import { getSettings, setSettings } from './config';
-import { getState, onStateChange, type RecState } from './state';
+import {
+  getState,
+  JOIN_SESSION_KEY,
+  onStateChange,
+  type RecState,
+} from './state';
 import type { Message, RecordingStatus } from './types';
 import type { Segment } from './transcript';
 
@@ -17,6 +22,8 @@ const recordBtn = $<HTMLButtonElement>('record');
 const statusEl = $<HTMLSpanElement>('status');
 const micToggle = $<HTMLInputElement>('withMic');
 const debugToggle = $<HTMLInputElement>('debug');
+const saveAudioToggle = $<HTMLInputElement>('saveAudio');
+const exportBtn = $<HTMLButtonElement>('exportDebug');
 const wsUrlInput = $<HTMLInputElement>('wsUrl');
 const micSetupLink = $<HTMLAnchorElement>('micSetup');
 const errorEl = $<HTMLElement>('error');
@@ -71,6 +78,7 @@ async function init(): Promise<void> {
   const settings = await getSettings();
   micToggle.checked = settings.withMic;
   debugToggle.checked = settings.debug;
+  saveAudioToggle.checked = settings.saveAudio;
   wsUrlInput.value = settings.wsUrl;
 
   render(await getState());
@@ -93,10 +101,46 @@ debugToggle.addEventListener(
   'change',
   () => void setSettings({ debug: debugToggle.checked }),
 );
+saveAudioToggle.addEventListener(
+  'change',
+  () => void setSettings({ saveAudio: saveAudioToggle.checked }),
+);
 wsUrlInput.addEventListener(
   'change',
   () => void setSettings({ wsUrl: wsUrlInput.value.trim() }),
 );
+
+// Everything needed to diagnose the last recording in one file: the transcript,
+// the join inputs (speaker timeline, per-stream words and clocks, adapter
+// snapshots) and the settings it ran with. The sessionId matches the audio the
+// streaming service saved, if "save audio" was on.
+async function exportDebugBundle(): Promise<void> {
+  const [settings, recState, stored] = await Promise.all([
+    getSettings(),
+    getState(),
+    chrome.storage.local.get(JOIN_SESSION_KEY),
+  ]);
+  const session = stored[JOIN_SESSION_KEY] as
+    | { sessionId?: string | null }
+    | undefined;
+  const bundle = {
+    exportedAt: new Date().toISOString(),
+    extensionVersion: chrome.runtime.getManifest().version,
+    settings,
+    recState,
+    session: session ?? null,
+  };
+  const url = URL.createObjectURL(
+    new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }),
+  );
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `meeting-capture-${session?.sessionId ?? Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+exportBtn.addEventListener('click', () => void exportDebugBundle());
 
 micSetupLink.addEventListener('click', (e) => {
   e.preventDefault();

@@ -10,6 +10,7 @@
 //   offscreen ──STATE_UPDATE───────▶ background   (status/error)
 //   content  ──MUTE_STATE──────────▶ offscreen    (gates the mic stream)
 
+import type { SpeakerDiagnostics } from './speaker/types';
 import type { RecState } from './state';
 import type { Word } from './transcript';
 
@@ -37,6 +38,9 @@ interface OffscreenStart {
   withMic: boolean;
   wsUrl: string;
   debug: boolean;
+  /** Identifies this recording on the streaming service (and its saved audio). */
+  sessionId: string;
+  saveAudio: boolean;
 }
 
 interface OffscreenStop {
@@ -73,6 +77,16 @@ interface SpeakerEvent {
   atEpoch: number;
 }
 
+// content script -> background: a periodic snapshot of what the platform adapter
+// sees (tiles, names, active speaker), kept with the session for debug bundles.
+interface SpeakerDiag {
+  type: 'SPEAKER_DIAG';
+  target: 'background';
+  platform: string;
+  diag: SpeakerDiagnostics;
+  atEpoch: number;
+}
+
 // content script -> offscreen: the local user's own mic mute state. While muted,
 // the offscreen sends silence instead of mic audio, so muted self-talk never
 // leaves the machine.
@@ -97,6 +111,7 @@ export type Message =
   | OffscreenStart
   | OffscreenStop
   | OffscreenSetMic
+  | SpeakerDiag
   | TranscriptUpdate
   | SpeakerEvent
   | MuteState

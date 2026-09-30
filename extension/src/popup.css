@@ -84,6 +84,16 @@ button.primary:disabled {
   cursor: default;
 }
 
+button.secondary {
+  padding: 7px;
+  font-size: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
 .options {
   margin-top: 14px;
   display: flex;

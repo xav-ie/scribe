@@ -42,8 +42,16 @@ interface Session {
   micStream: MediaStream | null;
   tab: Channel;
   mic: Channel | null;
+  stream: StreamOpts;
+}
+
+// Per-recording settings every channel's socket needs.
+interface StreamOpts {
   wsUrl: string;
   debug: boolean;
+  /** Names the recording on the streaming service, which saves audio under it. */
+  sessionId: string;
+  saveAudio: boolean;
 }
 
 let session: Session | null = null;
@@ -131,11 +139,11 @@ function floatToInt16(input: Float32Array): ArrayBuffer {
 function openChannel(
   ctx: AudioContext,
   source: MediaStreamAudioSourceNode,
-  wsUrl: string,
+  stream: StreamOpts,
   channelName: 'tab' | 'mic',
-  debug: boolean,
   primary: boolean,
 ): Channel {
+  const { wsUrl, debug } = stream;
   const node = new AudioWorkletNode(ctx, WORKLET_NAME, {
     numberOfInputs: 1,
     numberOfOutputs: 1,
@@ -159,7 +167,14 @@ function openChannel(
   };
 
   ws.addEventListener('open', () => {
-    ws.send(JSON.stringify({ sampleRate: ctx.sampleRate }));
+    ws.send(
+      JSON.stringify({
+        sampleRate: ctx.sampleRate,
+        sessionId: stream.sessionId,
+        channel: channelName,
+        save: stream.saveAudio,
+      }),
+    );
     if (debug) {
       console.log(`[offscreen] ${channelName} ws open @ ${ctx.sampleRate} Hz`);
     }
@@ -259,9 +274,8 @@ async function addMic(): Promise<void> {
   session.mic = openChannel(
     session.ctx,
     micSource,
-    session.wsUrl,
+    session.stream,
     'mic',
-    session.debug,
     false,
   );
   console.log('[offscreen] mic added');
@@ -276,12 +290,9 @@ function removeMic(): void {
   console.log('[offscreen] mic removed');
 }
 
-async function start(opts: {
-  streamId: string;
-  withMic: boolean;
-  wsUrl: string;
-  debug: boolean;
-}): Promise<void> {
+async function start(
+  opts: StreamOpts & { streamId: string; withMic: boolean },
+): Promise<void> {
   if (session) return;
   // The offscreen doc outlives recordings; the content script re-reports the
   // live value right after this, unless it can't detect one.
@@ -303,14 +314,19 @@ async function start(opts: {
     const tabSource = ctx.createMediaStreamSource(new MediaStream([tabAudio]));
     tabSource.connect(ctx.destination); // unmute: user keeps hearing the meeting
 
+    const stream: StreamOpts = {
+      wsUrl: opts.wsUrl,
+      debug: opts.debug,
+      sessionId: opts.sessionId,
+      saveAudio: opts.saveAudio,
+    };
     session = {
       ctx,
       tabStream,
       micStream: null,
-      tab: openChannel(ctx, tabSource, opts.wsUrl, 'tab', opts.debug, true),
+      tab: openChannel(ctx, tabSource, stream, 'tab', true),
       mic: null,
-      wsUrl: opts.wsUrl,
-      debug: opts.debug,
+      stream,
     };
 
     if (opts.withMic) await addMic();

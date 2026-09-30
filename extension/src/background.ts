@@ -10,7 +10,8 @@
 
 import { getSettings } from './config';
 import { dlog, expose, setDebug } from './debug';
-import { getState, setState } from './state';
+import type { SpeakerDiagnostics } from './speaker/types';
+import { getState, JOIN_SESSION_KEY as SESSION_KEY, setState } from './state';
 import {
   mergeTranscript,
   type Channel,
@@ -20,7 +21,8 @@ import {
 import type { Message } from './types';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
-const SESSION_KEY = 'joinSession';
+// Adapter snapshots arrive every 10 s; keep about two hours of them.
+const MAX_DIAGNOSTICS = 720;
 
 // The local mic is always attributed to the user — it's the one voice we can
 // label with certainty, even while muted. (Make this their name if preferred.)
@@ -28,21 +30,32 @@ const MIC_SPEAKER = 'Me';
 
 interface JoinSession {
   active: boolean;
+  /** Names this recording on the streaming service, including its saved audio. */
+  sessionId: string | null;
+  startedAt: number | null;
+  /** The captured tab; only its content script's diagnostics are kept. */
+  tabId: number | null;
   timeline: SpeakerSpan[];
   tabWords: Word[];
   tabEpoch: number | null;
   /** One entry per mic stream: toggling the mic off and on opens a new one. */
   mic: Channel[];
   rawText: string;
+  /** What the platform adapter saw during the recording, for debug bundles. */
+  diagnostics: (SpeakerDiagnostics & { platform: string; at: number })[];
 }
 
 const EMPTY_SESSION: JoinSession = {
   active: false,
+  sessionId: null,
+  startedAt: null,
+  tabId: null,
   timeline: [],
   tabWords: [],
   tabEpoch: null,
   mic: [],
   rawText: '',
+  diagnostics: [],
 };
 
 // In-memory cache so back-to-back events don't race on read-modify-write of
@@ -113,13 +126,20 @@ async function startRecording(): Promise<void> {
     rawText: '',
     error: undefined,
   });
-  await saveSession({ ...EMPTY_SESSION, active: true });
-
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
     await setState({ status: 'idle', error: 'No active tab to capture.' });
     return;
   }
+
+  const sessionId = crypto.randomUUID();
+  await saveSession({
+    ...EMPTY_SESSION,
+    active: true,
+    sessionId,
+    startedAt: Date.now(),
+    tabId: tab.id,
+  });
 
   const settings = await getSettings();
 
@@ -141,6 +161,8 @@ async function startRecording(): Promise<void> {
       withMic: settings.withMic,
       wsUrl: settings.wsUrl,
       debug: settings.debug,
+      sessionId,
+      saveAudio: settings.saveAudio,
     } satisfies Message)
     .catch(() => {});
 
@@ -212,7 +234,21 @@ async function onSpeakerEvent(name: string, atEpoch: number): Promise<void> {
   await recompute(mem!);
 }
 
-chrome.runtime.onMessage.addListener((message: Message) => {
+async function onSpeakerDiag(
+  tabId: number | undefined,
+  platform: string,
+  diag: SpeakerDiagnostics,
+  at: number,
+): Promise<void> {
+  const s = await session();
+  if (!s.active || tabId !== s.tabId) return;
+  const diagnostics = [...s.diagnostics, { ...diag, platform, at }].slice(
+    -MAX_DIAGNOSTICS,
+  );
+  await saveSession({ ...s, diagnostics });
+}
+
+chrome.runtime.onMessage.addListener((message: Message, sender) => {
   if (message.target !== 'background') return;
   switch (message.type) {
     case 'START_RECORDING': {
@@ -240,6 +276,15 @@ chrome.runtime.onMessage.addListener((message: Message) => {
     }
     case 'SPEAKER_EVENT': {
       onSpeakerEvent(message.name, message.atEpoch).catch(() => {});
+      break;
+    }
+    case 'SPEAKER_DIAG': {
+      onSpeakerDiag(
+        sender.tab?.id,
+        message.platform,
+        message.diag,
+        message.atEpoch,
+      ).catch(() => {});
       break;
     }
   }
