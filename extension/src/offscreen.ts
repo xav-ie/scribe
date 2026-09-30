@@ -229,6 +229,8 @@ function openChannel(
     if (!session || ws.readyState !== WebSocket.OPEN) return;
     if (channel.captureStartEpoch === null) {
       channel.captureStartEpoch = Date.now();
+      // The stream's clock, so saved audio can be lined up with the transcript.
+      ws.send(JSON.stringify({ epoch: channel.captureStartEpoch }));
     }
     const data = e.data as Float32Array;
     // While muted, stream silence on the mic channel: your voice never leaves

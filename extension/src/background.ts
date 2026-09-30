@@ -35,6 +35,8 @@ interface JoinSession {
   startedAt: number | null;
   /** The captured tab; only its content script's diagnostics are kept. */
   tabId: number | null;
+  /** Meeting client, from the captured tab's host (meet, zoom, or the host). */
+  platform: string | null;
   timeline: SpeakerSpan[];
   tabWords: Word[];
   tabEpoch: number | null;
@@ -50,6 +52,7 @@ const EMPTY_SESSION: JoinSession = {
   sessionId: null,
   startedAt: null,
   tabId: null,
+  platform: null,
   timeline: [],
   tabWords: [],
   tabEpoch: null,
@@ -139,6 +142,7 @@ async function startRecording(): Promise<void> {
     sessionId,
     startedAt: Date.now(),
     tabId: tab.id,
+    platform: platformOf(tab.url),
   });
 
   const settings = await getSettings();
@@ -179,8 +183,7 @@ async function startRecording(): Promise<void> {
 async function stopRecording(): Promise<void> {
   const { status } = await getState();
   if (status !== 'recording') return;
-  const s = await session();
-  await saveSession({ ...s, active: false });
+  // Stop capturing first; the upload may be slow and must not hold it open.
   chrome.runtime
     .sendMessage({
       type: 'OFFSCREEN_STOP',
@@ -188,6 +191,51 @@ async function stopRecording(): Promise<void> {
     } satisfies Message)
     .catch(() => {});
   await setState({ status: 'idle' });
+  await finishSession();
+}
+
+function platformOf(url: string | undefined): string | null {
+  if (!url) return null;
+  const host = new URL(url).hostname;
+  if (host === 'meet.google.com') return 'meet';
+  if (host.endsWith('zoom.us')) return 'zoom';
+  return host;
+}
+
+// End the session once, however the recording stopped (the stop button, or the
+// offscreen doc going idle when its socket drops), and hand the streaming
+// service the full record so its session browser has the transcript, speaker
+// timeline and clocks next to any saved audio.
+async function finishSession(): Promise<void> {
+  const s = await session();
+  if (!s.active) return;
+  await saveSession({ ...s, active: false });
+  if (!s.sessionId) return;
+  const [{ wsUrl }, { segments = [], rawText = '' }] = await Promise.all([
+    getSettings(),
+    getState(),
+  ]);
+  const url = new URL(`/api/sessions/${s.sessionId}`, wsUrl);
+  url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(15_000),
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...s,
+        active: false,
+        stoppedAt: Date.now(),
+        extensionVersion: chrome.runtime.getManifest().version,
+        segments,
+        rawText,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    dlog('[bg] session uploaded:', s.sessionId);
+  } catch (error) {
+    console.warn('[bg] session upload failed:', errorMessage(error));
+  }
 }
 
 async function onTranscriptUpdate(
@@ -263,6 +311,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
     }
     case 'STATE_UPDATE': {
       setState(message.patch).catch(() => {});
+      if (message.patch.status === 'idle') finishSession().catch(() => {});
       break;
     }
     case 'TRANSCRIPT_UPDATE': {
@@ -297,8 +346,7 @@ async function reconcileStaleState(): Promise<void> {
   const { status } = await getState();
   if (status !== 'idle' && !(await hasOffscreenDocument())) {
     await setState({ status: 'idle' });
-    const s = await session();
-    await saveSession({ ...s, active: false });
+    await finishSession();
   }
 }
 

@@ -31,6 +31,8 @@ export interface Segment {
   start: number;
   end: number;
   text: string;
+  /** Wall-clock epoch (ms) of the first word, for seeking saved audio. */
+  at: number;
 }
 
 /** One ASR stream's words plus the wall-clock epoch (ms) of its sample 0. */
@@ -100,7 +102,13 @@ export function mergeTranscript(
       last.text += ` ${s.word}`;
       last.end = t;
     } else {
-      segments.push({ speaker: s.speaker, start: t, end: t, text: s.word });
+      segments.push({
+        speaker: s.speaker,
+        start: t,
+        end: t,
+        text: s.word,
+        at: s.at,
+      });
     }
   }
   return segments;

@@ -21,12 +21,16 @@ export default defineManifest({
     type: 'module',
   },
   permissions: ['tabCapture', 'offscreen', 'storage', 'activeTab', 'tabs'],
-  // WebSocket endpoints the offscreen doc may stream PCM to. A host must be
-  // listed here or the connection is blocked.
+  // Streaming service endpoints: the WebSocket the offscreen doc streams PCM to,
+  // and the HTTP API the worker posts session records to. A host must be listed
+  // here or the connection is blocked.
   host_permissions: [
     'wss://scribe.lalala.casa/*', // deployed streaming ASR service
+    'https://scribe.lalala.casa/*', // its session API: records posted at stop
     'ws://localhost:8000/*', // local dev service
     'ws://127.0.0.1:8000/*',
+    'http://localhost:8000/*',
+    'http://127.0.0.1:8000/*',
   ],
   // Active-speaker scraper, injected into supported meeting clients. It reports
   // speaker changes to the background worker, which joins them with the streamed
