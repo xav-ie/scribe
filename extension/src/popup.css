@@ -154,6 +154,18 @@ button.secondary {
   display: none;
 }
 
+.warning {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 184, 77, 0.14);
+  border: 1px solid rgba(255, 184, 77, 0.4);
+  color: #ffb84d;
+}
+.warning.hidden {
+  display: none;
+}
+
 .result {
   margin-top: 14px;
   border-top: 1px solid #2c303a;

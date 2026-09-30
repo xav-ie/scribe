@@ -128,6 +128,7 @@ async function startRecording(): Promise<void> {
     segments: [],
     rawText: '',
     error: undefined,
+    warning: undefined,
   });
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
@@ -170,14 +171,42 @@ async function startRecording(): Promise<void> {
     } satisfies Message)
     .catch(() => {});
 
-  // Tell the meeting tab's content script to re-emit the current speaker so the
-  // timeline is seeded from the first word. Harmless if no content script there.
-  chrome.tabs
-    .sendMessage(tab.id, {
-      type: 'RESET_SPEAKER',
-      target: 'content',
-    } satisfies Message)
-    .catch(() => {});
+  const detecting = await startSpeakerDetection(tab.id, platformOf(tab.url));
+  if (detecting !== true) await setState({ warning: detecting });
+}
+
+const SPEAKER_PLATFORMS = new Set(['meet', 'zoom']);
+
+// Ask the meeting tab's content script to re-emit the current speaker and mute
+// state, seeding the timeline from the first word. Chrome only injects declared
+// content scripts on page load, so a tab opened before the extension was
+// (re)loaded has none: inject it then. Returns true, or a warning for the popup.
+async function startSpeakerDetection(
+  tabId: number,
+  platform: string | null,
+): Promise<true | string> {
+  if (!platform || !SPEAKER_PLATFORMS.has(platform)) {
+    return 'Speaker detection only works on Google Meet and Zoom in the browser, so everyone will show as Unknown and muting is not detected.';
+  }
+  const reset = () =>
+    chrome.tabs
+      .sendMessage(tabId, {
+        type: 'RESET_SPEAKER',
+        target: 'content',
+      } satisfies Message)
+      .then(
+        () => true,
+        () => false,
+      );
+  if (await reset()) return true;
+  const files = chrome.runtime.getManifest().content_scripts?.[0]?.js ?? [];
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files });
+  } catch (error) {
+    dlog('[bg] speaker script injection failed:', errorMessage(error));
+  }
+  if (await reset()) return true;
+  return 'Speaker detection is not running on this tab, so everyone will show as Unknown and muting is not detected. Reload the meeting tab and start again.';
 }
 
 async function stopRecording(): Promise<void> {

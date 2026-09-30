@@ -14,7 +14,15 @@ import type { SpeakerAdapter } from './types';
 const ADAPTERS: readonly SpeakerAdapter[] = [meetAdapter, zoomAdapter];
 const adapter = ADAPTERS.find((a) => a.matches(location.host));
 
-if (adapter) {
+// CRXJS's loader imports this module, which runs once per page context, then
+// calls onExecute on every injection. Setup lives there so the background can
+// re-inject into a tab whose earlier copy was orphaned by an extension reload
+// (see startSpeakerDetection).
+export function onExecute(): void {
+  if (adapter) start(adapter);
+}
+
+function start(adapter: SpeakerAdapter): void {
   // Callback form (not the promise) — content scripts run as classic scripts
   // with no top-level await, and this avoids a floating promise chain.
   chrome.storage.sync.get({ debug: false }, (s) => setDebug(Boolean(s.debug)));
@@ -61,15 +69,19 @@ if (adapter) {
   // A fresh recording resets the timeline; re-emit the current speaker + mute
   // state so both are seeded from the start (force past the dedupe). Mute is
   // reported immediately, before the mic stream finishes opening.
-  chrome.runtime.onMessage.addListener((message: Message) => {
-    if (message.target === 'content' && message.type === 'RESET_SPEAKER') {
-      const current = last;
-      last = null;
-      lastMuted = null;
-      reportMuted();
-      if (current) emit(current);
-    }
-  });
+  // The reply tells the background this script is alive in the captured tab.
+  chrome.runtime.onMessage.addListener(
+    (message: Message, _sender, sendResponse) => {
+      if (message.target === 'content' && message.type === 'RESET_SPEAKER') {
+        const current = last;
+        last = null;
+        lastMuted = null;
+        reportMuted();
+        if (current) emit(current);
+        sendResponse({ platform: adapter.platform });
+      }
+    },
+  );
 
   // Debug: dump what the adapter sees every 2s, for selector tuning (only logs
   // when the popup "debug" toggle is on).

@@ -14,6 +14,8 @@ export interface RecState {
   rawText?: string;
   /** Present when the last run failed. Cleared on the next start. */
   error?: string;
+  /** Recording works but something is degraded (e.g. no speaker detection). */
+  warning?: string;
   updatedAt: number;
 }
 

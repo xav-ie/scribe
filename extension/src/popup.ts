@@ -27,6 +27,7 @@ const exportBtn = $<HTMLButtonElement>('exportDebug');
 const wsUrlInput = $<HTMLInputElement>('wsUrl');
 const micSetupLink = $<HTMLAnchorElement>('micSetup');
 const errorEl = $<HTMLElement>('error');
+const warningEl = $<HTMLElement>('warning');
 const resultEl = $<HTMLElement>('result');
 const speakersEl = $<HTMLElement>('speakers');
 const transcriptEl = $<HTMLElement>('transcript');
@@ -46,6 +47,8 @@ function render(state: RecState): void {
   } else {
     errorEl.classList.add('hidden');
   }
+  warningEl.textContent = state.warning ?? '';
+  warningEl.classList.toggle('hidden', !state.warning);
 
   if (state.segments && state.segments.length > 0) {
     renderSegments(state.segments);
