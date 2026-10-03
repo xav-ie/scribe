@@ -201,7 +201,10 @@ async function startSpeakerDetection(
   if (await reset()) return true;
   const files = chrome.runtime.getManifest().content_scripts?.[0]?.js ?? [];
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files });
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files,
+    });
   } catch (error) {
     dlog('[bg] speaker script injection failed:', errorMessage(error));
   }

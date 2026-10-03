@@ -62,6 +62,9 @@ export default defineManifest({
       matches: ['https://meet.google.com/*', 'https://*.zoom.us/*'],
       js: ['src/speaker/index.ts'],
       run_at: 'document_idle',
+      // Zoom's web client renders the meeting inside an iframe
+      // (iframe#webclient) of its app shell, so the scraper must run there too.
+      all_frames: true,
     },
   ],
   // Declaring the standalone pages here makes CRXJS bundle them even though they

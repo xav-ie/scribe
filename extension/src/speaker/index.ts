@@ -96,10 +96,19 @@ function start(adapter: SpeakerAdapter): void {
   // it only while recording), so debug bundles show what detection saw.
   // While no tiles are found (selectors stale, or the UI moved into a frame),
   // the first few snapshots also carry a page map to re-tune them from.
+  // The script runs in every frame of a meeting tab. The top page always
+  // reports, so a broken layout leaves a page map (its probe also reads
+  // same-origin iframes); an iframe only reports once it has found
+  // participants, which keeps the meeting's own frame and silences unrelated
+  // ones such as Zoom's chat widget.
+  const isTop = globalThis.top === globalThis.self;
+  let foundTiles = false;
   let probes = 0;
   setInterval(() => {
     const diag = adapter.diagnose();
-    if (diag.tiles === 0 && probes < MAX_PROBES) {
+    foundTiles ||= diag.tiles > 0;
+    if (!isTop && !foundTiles) return;
+    if (isTop && diag.tiles === 0 && probes < MAX_PROBES) {
       probes += 1;
       diag.probe = domProbe();
     }
