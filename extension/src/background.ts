@@ -8,7 +8,7 @@
 // chrome.storage.local (joinSession) + an in-memory cache, so a streamed word or
 // speaker event arriving after the worker was torn down still reconstructs.
 
-import { getSettings } from './config';
+import { BUILD, getSettings } from './config';
 import { dlog, expose, setDebug } from './debug';
 import type { SpeakerDiagnostics } from './speaker/types';
 import { getState, JOIN_SESSION_KEY as SESSION_KEY, setState } from './state';
@@ -255,7 +255,7 @@ async function finishSession(): Promise<void> {
         ...s,
         active: false,
         stoppedAt: Date.now(),
-        extensionVersion: chrome.runtime.getManifest().version,
+        extensionVersion: BUILD,
         segments,
         rawText,
       }),

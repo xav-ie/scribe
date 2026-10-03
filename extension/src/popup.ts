@@ -1,4 +1,4 @@
-import { getSettings, setSettings } from './config';
+import { BUILD, getSettings, setSettings } from './config';
 import {
   getState,
   JOIN_SESSION_KEY,
@@ -83,6 +83,7 @@ async function init(): Promise<void> {
   debugToggle.checked = settings.debug;
   saveAudioToggle.checked = settings.saveAudio;
   wsUrlInput.value = settings.wsUrl;
+  $<HTMLElement>('build').textContent = BUILD;
 
   render(await getState());
   onStateChange(render);
@@ -128,7 +129,7 @@ async function exportDebugBundle(): Promise<void> {
     | undefined;
   const bundle = {
     exportedAt: new Date().toISOString(),
-    extensionVersion: chrome.runtime.getManifest().version,
+    extensionVersion: BUILD,
     settings,
     recState,
     session: session ?? null,

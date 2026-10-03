@@ -1,10 +1,19 @@
+import { execFileSync } from 'node:child_process';
 import { defineManifest } from '@crxjs/vite-plugin';
 import pkg from './package.json';
+
+// Every build says which commit it came from (+dirty for uncommitted changes),
+// so a session record or the popup shows exactly what code was running.
+// Build-time read of local git metadata, not user input.
+// eslint-disable-next-line sonarjs/no-os-command-from-path
+const git = (...args: string[]) => execFileSync('git', args).toString().trim();
+const BUILD = `${pkg.version} ${git('rev-parse', '--short', 'HEAD')}${git('status', '--porcelain', '--untracked-files=no') ? '+dirty' : ''} ${new Date().toISOString().slice(0, 16)}Z`;
 
 export default defineManifest({
   manifest_version: 3,
   name: 'Meeting Capture',
   version: pkg.version,
+  version_name: BUILD,
   description: pkg.description,
   icons: {
     16: 'public/icons/icon16.png',

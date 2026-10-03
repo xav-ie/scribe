@@ -1,5 +1,10 @@
 // Small typed wrapper over chrome.storage.sync for user-configurable settings.
 
+/** Version plus the commit and time it was built from (see manifest.config.ts). */
+export const BUILD =
+  chrome.runtime.getManifest().version_name ??
+  chrome.runtime.getManifest().version;
+
 export interface Settings {
   /** WebSocket URL of the streaming ASR service, e.g. wss://scribe.lalala.casa/ws */
   wsUrl: string;
