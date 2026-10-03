@@ -33,22 +33,34 @@ function start(adapter: SpeakerAdapter): void {
       setDebug(Boolean(changes.debug.newValue));
   });
 
+  const timers: ReturnType<typeof setInterval>[] = [];
+  // Reloading the extension cuts this copy off from it: chrome.runtime.id goes
+  // undefined and sendMessage throws "Extension context invalidated". Shut down
+  // quietly instead of throwing on every tick; starting a recording injects a
+  // fresh copy.
+  const send = (message: Message): void => {
+    if (!chrome.runtime?.id) {
+      for (const t of timers) clearInterval(t);
+      stopAdapter();
+      return;
+    }
+    chrome.runtime.sendMessage(message).catch(() => {});
+  };
+
   let last: string | null = null;
   const emit = (name: string): void => {
     if (name === last) return;
     last = name;
     dlog('[speaker] active:', name);
-    chrome.runtime
-      .sendMessage({
-        type: 'SPEAKER_EVENT',
-        target: 'background',
-        name,
-        atEpoch: Date.now(),
-      } satisfies Message)
-      .catch(() => {});
+    send({
+      type: 'SPEAKER_EVENT',
+      target: 'background',
+      name,
+      atEpoch: Date.now(),
+    });
   };
 
-  adapter.start(emit);
+  const stopAdapter = adapter.start(emit);
 
   // Poll the local user's mute state and report changes; the offscreen streams
   // silence (no recording) while muted. null = can't detect → don't gate.
@@ -58,15 +70,9 @@ function start(adapter: SpeakerAdapter): void {
     if (muted === null || muted === lastMuted) return;
     lastMuted = muted;
     dlog('[speaker] muted:', muted);
-    chrome.runtime
-      .sendMessage({
-        type: 'MUTE_STATE',
-        target: 'offscreen',
-        muted,
-      } satisfies Message)
-      .catch(() => {});
+    send({ type: 'MUTE_STATE', target: 'offscreen', muted });
   };
-  setInterval(reportMuted, 500);
+  timers.push(setInterval(reportMuted, 500));
 
   // A fresh recording resets the timeline; re-emit the current speaker + mute
   // state so both are seeded from the start (force past the dedupe). Mute is
@@ -87,9 +93,11 @@ function start(adapter: SpeakerAdapter): void {
 
   // Debug: dump what the adapter sees every 2s, for selector tuning (only logs
   // when the popup "debug" toggle is on).
-  setInterval(
-    () => dlog('[speaker]', adapter.platform, adapter.diagnose()),
-    2000,
+  timers.push(
+    setInterval(
+      () => dlog('[speaker]', adapter.platform, adapter.diagnose()),
+      2000,
+    ),
   );
 
   // Snapshot the adapter's view every 10s into the session (the background keeps
@@ -104,7 +112,7 @@ function start(adapter: SpeakerAdapter): void {
   const isTop = globalThis.top === globalThis.self;
   let foundTiles = false;
   let probes = 0;
-  setInterval(() => {
+  const snapshot = (): void => {
     const diag = adapter.diagnose();
     foundTiles ||= diag.tiles > 0;
     if (!isTop && !foundTiles) return;
@@ -112,16 +120,15 @@ function start(adapter: SpeakerAdapter): void {
       probes += 1;
       diag.probe = domProbe();
     }
-    chrome.runtime
-      .sendMessage({
-        type: 'SPEAKER_DIAG',
-        target: 'background',
-        platform: adapter.platform,
-        diag,
-        atEpoch: Date.now(),
-      } satisfies Message)
-      .catch(() => {});
-  }, 10_000);
+    send({
+      type: 'SPEAKER_DIAG',
+      target: 'background',
+      platform: adapter.platform,
+      diag,
+      atEpoch: Date.now(),
+    });
+  };
+  timers.push(setInterval(snapshot, 10_000));
 
   // Console test API (run in the meeting tab; if it's undefined in the console,
   // switch the console's JS context to this content script):
