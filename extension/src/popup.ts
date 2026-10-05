@@ -87,6 +87,12 @@ async function init(): Promise<void> {
 
   render(await getState());
   onStateChange(render);
+  chrome.runtime
+    .sendMessage({
+      type: 'RETRY_UPLOADS',
+      target: 'background',
+    } satisfies Message)
+    .catch(() => {});
   await trackMicPermission();
 }
 

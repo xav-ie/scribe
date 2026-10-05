@@ -19,6 +19,12 @@ interface StartRecording {
   target: 'background';
 }
 
+// popup -> background: retry posting finished sessions scribe doesn't have yet.
+interface RetryUploads {
+  type: 'RETRY_UPLOADS';
+  target: 'background';
+}
+
 interface StopRecording {
   type: 'STOP_RECORDING';
   target: 'background';
@@ -106,6 +112,7 @@ interface ResetSpeaker {
 
 export type Message =
   | StartRecording
+  | RetryUploads
   | StopRecording
   | StateUpdate
   | OffscreenStart

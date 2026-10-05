@@ -173,6 +173,7 @@ async function startRecording(): Promise<void> {
 
   const detecting = await startSpeakerDetection(tab.id, platformOf(tab.url));
   if (detecting !== true) await setState({ warning: detecting });
+  uploadUnsent().catch(() => {});
 }
 
 const SPEAKER_PLATFORMS = new Set(['meet', 'zoom']);
@@ -243,30 +244,55 @@ async function finishSession(): Promise<void> {
   if (!s.active) return;
   await saveSession({ ...s, active: false });
   if (!s.sessionId) return;
-  const [{ wsUrl }, { segments = [], rawText = '' }] = await Promise.all([
-    getSettings(),
-    getState(),
-  ]);
-  const url = new URL(`/api/sessions/${s.sessionId}`, wsUrl);
-  url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
+  const { segments = [], rawText = '' } = await getState();
+  const stored = await chrome.storage.local.get(UNSENT_KEY);
+  const unsent = (stored[UNSENT_KEY] ?? {}) as Record<string, unknown>;
+  unsent[s.sessionId] = {
+    ...s,
+    active: false,
+    stoppedAt: Date.now(),
+    extensionVersion: BUILD,
+    segments,
+    rawText,
+  };
+  await chrome.storage.local.set({ [UNSENT_KEY]: unsent });
+  await uploadUnsent();
+}
+
+// Finished sessions wait here until the streaming service has them, so a failed
+// upload is retried (popup opened, next recording started) instead of lost,
+// and the popup says why it failed.
+const UNSENT_KEY = 'unsentSessions';
+const UPLOAD_WARNING = "Couldn't save the last session to scribe";
+
+async function uploadUnsent(): Promise<void> {
+  const stored = await chrome.storage.local.get(UNSENT_KEY);
+  const unsent = (stored[UNSENT_KEY] ?? {}) as Record<string, unknown>;
+  const ids = Object.keys(unsent);
+  if (ids.length === 0) return;
+  const { wsUrl } = await getSettings();
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(15_000),
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...s,
-        active: false,
-        stoppedAt: Date.now(),
-        extensionVersion: BUILD,
-        segments,
-        rawText,
-      }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    dlog('[bg] session uploaded:', s.sessionId);
+    for (const id of ids) {
+      const url = new URL(`/api/sessions/${id}`, wsUrl);
+      url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(15_000),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(unsent[id]),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      delete unsent[id];
+      await chrome.storage.local.set({ [UNSENT_KEY]: unsent });
+      dlog('[bg] session uploaded:', id);
+    }
+    const { warning } = await getState();
+    if (warning?.startsWith(UPLOAD_WARNING))
+      await setState({ warning: undefined });
   } catch (error) {
-    console.warn('[bg] session upload failed:', errorMessage(error));
+    await setState({
+      warning: `${UPLOAD_WARNING} (${errorMessage(error)}). It retries when you open this popup.`,
+    });
   }
 }
 
@@ -339,6 +365,10 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
     }
     case 'STOP_RECORDING': {
       stopRecording().catch(() => {});
+      break;
+    }
+    case 'RETRY_UPLOADS': {
+      uploadUnsent().catch(() => {});
       break;
     }
     case 'STATE_UPDATE': {
