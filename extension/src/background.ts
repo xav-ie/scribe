@@ -41,42 +41,77 @@ interface JoinSession {
   tabWords: Word[];
   tabEpoch: number | null;
   /** One entry per mic stream: toggling the mic off and on opens a new one. */
-  mic: Channel[];
-  rawText: string;
+  mic: MicStream[];
   /** What the platform adapter saw during the recording, for debug bundles. */
   diagnostics: (SpeakerDiagnostics & { platform: string; at: number })[];
 }
 
-const EMPTY_SESSION: JoinSession = {
-  active: false,
-  sessionId: null,
-  startedAt: null,
-  tabId: null,
-  platform: null,
-  timeline: [],
-  tabWords: [],
-  tabEpoch: null,
-  mic: [],
-  rawText: '',
-  diagnostics: [],
-};
-
-// In-memory cache so back-to-back events don't race on read-modify-write of
-// storage. Reloaded from storage if the worker was torn down between events.
-let mem: JoinSession | null = null;
-
-async function session(): Promise<JoinSession> {
-  if (mem) return mem;
-  const stored = await chrome.storage.local.get(SESSION_KEY);
-  mem = (stored[SESSION_KEY] as JoinSession | undefined) ?? {
-    ...EMPTY_SESSION,
+// A fresh session every time: the lists are mutated in place, so they must
+// never be shared between sessions.
+function emptySession(): JoinSession {
+  return {
+    active: false,
+    sessionId: null,
+    startedAt: null,
+    tabId: null,
+    platform: null,
+    timeline: [],
+    tabWords: [],
+    tabEpoch: null,
+    mic: [],
+    diagnostics: [],
   };
-  return mem;
 }
 
-async function saveSession(next: JoinSession): Promise<void> {
-  mem = next;
-  await chrome.storage.local.set({ [SESSION_KEY]: next });
+interface MicStream extends Channel {
+  words: Word[];
+  epoch: number;
+}
+
+// While the worker runs, the in-memory session is the source of truth and every
+// handler changes it in place (never a copy, which a concurrent handler could
+// then save over). Storage holds a copy so a
+// session survives the worker being torn down; it is written at most every
+// SAVE_EVERY_MS (and immediately at start and stop), and the popup's
+// transcript is rebuilt at most every RECOMPUTE_EVERY_MS, instead of rewriting
+// the whole session and transcript on every streamed word.
+const SAVE_EVERY_MS = 5000;
+const RECOMPUTE_EVERY_MS = 1000;
+
+let mem: JoinSession | null = null;
+let loading: Promise<JoinSession> | null = null;
+// Set when an update shows we're missing words (the worker restarted from a
+// copy up to SAVE_EVERY_MS old); cleared once the offscreen doc resends.
+let resyncRequested = false;
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let recomputeTimer: ReturnType<typeof setTimeout> | undefined;
+
+// Events arriving together right after the worker wakes share one load, so
+// none of them works on (and then saves over) a separate copy.
+async function session(): Promise<JoinSession> {
+  if (mem) return mem;
+  loading ??= chrome.storage.local.get(SESSION_KEY).then((stored) => {
+    mem ??= (stored[SESSION_KEY] as JoinSession | undefined) ?? emptySession();
+    return mem;
+  });
+  return loading;
+}
+
+function saveSession(): void {
+  saveTimer ??= setTimeout(() => void flushSession(), SAVE_EVERY_MS);
+}
+
+async function flushSession(): Promise<void> {
+  clearTimeout(saveTimer);
+  saveTimer = undefined;
+  if (mem) await chrome.storage.local.set({ [SESSION_KEY]: mem });
+}
+
+function scheduleRecompute(): void {
+  recomputeTimer ??= setTimeout(() => {
+    recomputeTimer = undefined;
+    if (mem) recompute(mem).catch(() => {});
+  }, RECOMPUTE_EVERY_MS);
 }
 
 function errorMessage(error: unknown): string {
@@ -106,6 +141,8 @@ async function ensureOffscreenDocument(): Promise<void> {
 // Recompute the attributed transcript from the current join inputs and persist
 // it for the popup.
 async function recompute(s: JoinSession): Promise<void> {
+  clearTimeout(recomputeTimer);
+  recomputeTimer = undefined;
   const segments = mergeTranscript(
     { words: s.tabWords, epoch: s.tabEpoch },
     s.mic,
@@ -115,7 +152,8 @@ async function recompute(s: JoinSession): Promise<void> {
   dlog('[bg] recompute:', segments.length, 'segments | distinct speakers:', [
     ...new Set(segments.map((x) => x.speaker)),
   ]);
-  await setState({ segments, rawText: s.rawText });
+  const rawText = s.tabWords.map((w) => w.word).join(' ');
+  await setState({ segments, rawText });
 }
 
 async function startRecording(): Promise<void> {
@@ -137,14 +175,16 @@ async function startRecording(): Promise<void> {
   }
 
   const sessionId = crypto.randomUUID();
-  await saveSession({
-    ...EMPTY_SESSION,
+  mem = {
+    ...emptySession(),
     active: true,
     sessionId,
     startedAt: Date.now(),
     tabId: tab.id,
     platform: platformOf(tab.url),
-  });
+  };
+  resyncRequested = false;
+  await flushSession();
 
   const settings = await getSettings();
 
@@ -242,14 +282,17 @@ function platformOf(url: string | undefined): string | null {
 async function finishSession(): Promise<void> {
   const s = await session();
   if (!s.active) return;
-  await saveSession({ ...s, active: false });
+  // Before any await, so the stop button and the offscreen doc going idle (both
+  // land here) can't both finish and upload the session.
+  s.active = false;
+  await recompute(s);
+  await flushSession();
   if (!s.sessionId) return;
   const { segments = [], rawText = '' } = await getState();
   const stored = await chrome.storage.local.get(UNSENT_KEY);
   const unsent = (stored[UNSENT_KEY] ?? {}) as Record<string, unknown>;
   unsent[s.sessionId] = {
     ...s,
-    active: false,
     stoppedAt: Date.now(),
     extensionVersion: BUILD,
     segments,
@@ -298,24 +341,42 @@ async function uploadUnsent(): Promise<void> {
 
 async function onTranscriptUpdate(
   channel: 'tab' | 'mic',
+  from: number,
   words: Word[],
-  text: string,
   captureStartEpoch: number,
 ): Promise<void> {
   const s = await session();
   if (!s.active) return;
-  const next: JoinSession =
-    channel === 'mic'
-      ? {
-          ...s,
-          mic: [
-            ...s.mic.filter((c) => c.epoch !== captureStartEpoch),
-            { words, epoch: captureStartEpoch },
-          ],
-        }
-      : { ...s, tabWords: words, tabEpoch: captureStartEpoch, rawText: text };
-  await saveSession(next);
-  await recompute(mem!);
+  let target: Word[];
+  if (channel === 'mic') {
+    let stream = s.mic.find((c) => c.epoch === captureStartEpoch);
+    if (!stream) {
+      stream = { words: [], epoch: captureStartEpoch };
+      s.mic.push(stream);
+    }
+    target = stream.words;
+  } else {
+    s.tabEpoch = captureStartEpoch;
+    target = s.tabWords;
+  }
+  // Updates only carry new words, so one starting past what we hold means words
+  // went missing: ask the offscreen doc to resend its full lists.
+  if (from > target.length) {
+    if (!resyncRequested) {
+      resyncRequested = true;
+      chrome.runtime
+        .sendMessage({
+          type: 'OFFSCREEN_RESYNC',
+          target: 'offscreen',
+        } satisfies Message)
+        .catch(() => {});
+    }
+    return;
+  }
+  if (from === 0) resyncRequested = false;
+  target.splice(from, Infinity, ...words);
+  saveSession();
+  scheduleRecompute();
 }
 
 async function onSpeakerEvent(name: string, atEpoch: number): Promise<void> {
@@ -329,15 +390,15 @@ async function onSpeakerEvent(name: string, atEpoch: number): Promise<void> {
     dlog('[bg] speaker dropped (same as current):', name);
     return;
   }
-  const timeline = [...s.timeline, { name, from: atEpoch }];
+  s.timeline.push({ name, from: atEpoch });
   dlog(
     '[bg] speaker:',
     name,
     '| timeline:',
-    timeline.map((t) => t.name),
+    s.timeline.map((t) => t.name),
   );
-  await saveSession({ ...s, timeline });
-  await recompute(mem!);
+  saveSession();
+  scheduleRecompute();
 }
 
 async function onSpeakerDiag(
@@ -348,10 +409,9 @@ async function onSpeakerDiag(
 ): Promise<void> {
   const s = await session();
   if (!s.active || tabId !== s.tabId) return;
-  const diagnostics = [...s.diagnostics, { ...diag, platform, at }].slice(
-    -MAX_DIAGNOSTICS,
-  );
-  await saveSession({ ...s, diagnostics });
+  s.diagnostics.push({ ...diag, platform, at });
+  s.diagnostics.splice(0, s.diagnostics.length - MAX_DIAGNOSTICS);
+  saveSession();
 }
 
 chrome.runtime.onMessage.addListener((message: Message, sender) => {
@@ -379,8 +439,8 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
     case 'TRANSCRIPT_UPDATE': {
       onTranscriptUpdate(
         message.channel,
+        message.from,
         message.words,
-        message.text,
         message.captureStartEpoch,
       ).catch(() => {});
       break;
@@ -411,6 +471,11 @@ async function reconcileStaleState(): Promise<void> {
     await finishSession();
   }
 }
+
+// The worker is about to be torn down: keep everything the session has so far.
+chrome.runtime.onSuspend.addListener(() => {
+  flushSession().catch(() => {});
+});
 
 chrome.runtime.onInstalled.addListener(() => {
   reconcileStaleState().catch(() => {});
@@ -460,5 +525,8 @@ expose('scribe', {
   state: () => getState(),
   session: () => session(),
   inject: (name: string) => onSpeakerEvent(name, Date.now()),
-  reset: () => saveSession({ ...EMPTY_SESSION, active: true }),
+  reset: () => {
+    mem = { ...emptySession(), active: true };
+    return flushSession();
+  },
 });

@@ -34,6 +34,8 @@ interface Channel {
   captureStartEpoch: number | null;
   /** Set when we close it deliberately, so the close handler doesn't react. */
   closing: boolean;
+  /** The stream's full transcript, kept to resend if the background loses words. */
+  words: Word[];
 }
 
 interface Session {
@@ -55,6 +57,16 @@ interface StreamOpts {
 }
 
 let session: Session | null = null;
+
+// Bumped by every start and stop. A start still awaiting capture when a stop
+// (or another start) lands sees a newer number and backs out, releasing what
+// it opened, instead of recording while the background thinks it's idle.
+let generation = 0;
+// Whether the user wants the mic; checked again once it has opened, so toggling
+// it off (or on twice) while permission/capture is pending can't leave a hot
+// mic or a second socket.
+let micWanted = false;
+let micOpening = false;
 
 // While true, the mic streams silence — you're muted, so it isn't recorded.
 // Lives outside the session so a report that lands while start() is still
@@ -164,6 +176,7 @@ function openChannel(
     source,
     captureStartEpoch: null,
     closing: false,
+    words: [],
   };
 
   ws.addEventListener('open', () => {
@@ -184,20 +197,13 @@ function openChannel(
     try {
       const msg = JSON.parse(e.data as string) as {
         type: string;
-        text?: string;
+        from?: number;
         words?: Word[];
       };
-      if (msg.type !== 'partial' || !session) return;
-      chrome.runtime
-        .sendMessage({
-          type: 'TRANSCRIPT_UPDATE',
-          target: 'background',
-          channel: channelName,
-          words: msg.words ?? [],
-          text: msg.text ?? '',
-          captureStartEpoch: channel.captureStartEpoch ?? Date.now(),
-        } satisfies Message)
-        .catch(() => {});
+      if (msg.type !== 'words' || !session) return;
+      const from = msg.from ?? 0;
+      channel.words.splice(from, Infinity, ...(msg.words ?? []));
+      sendWords(channel, channelName, from);
     } catch (error) {
       console.warn('[offscreen] bad ws message', error);
     }
@@ -246,6 +252,24 @@ function openChannel(
   return channel;
 }
 
+// Forward a stream's words from index `from` on to the background.
+function sendWords(
+  channel: Channel,
+  channelName: 'tab' | 'mic',
+  from: number,
+): void {
+  chrome.runtime
+    .sendMessage({
+      type: 'TRANSCRIPT_UPDATE',
+      target: 'background',
+      channel: channelName,
+      from,
+      words: channel.words.slice(from),
+      captureStartEpoch: channel.captureStartEpoch ?? Date.now(),
+    } satisfies Message)
+    .catch(() => {});
+}
+
 function closeChannel(ch: Channel): void {
   ch.closing = true;
   try {
@@ -263,11 +287,14 @@ function closeChannel(ch: Channel): void {
 }
 
 async function addMic(): Promise<void> {
-  if (!session || session.mic) return;
-  const micStream = await openMicStream();
+  if (!session || session.mic || micOpening) return;
+  micOpening = true;
+  const micStream = await openMicStream().finally(() => {
+    micOpening = false;
+  });
   if (!micStream) return;
-  // The session may have ended while we awaited the mic permission.
-  if (!session) {
+  // The session may have ended, or the mic been toggled off, meanwhile.
+  if (!session || session.mic || !micWanted) {
     for (const t of micStream.getTracks()) t.stop();
     return;
   }
@@ -296,12 +323,24 @@ async function start(
   opts: StreamOpts & { streamId: string; withMic: boolean },
 ): Promise<void> {
   if (session) return;
+  const gen = ++generation;
   // The offscreen doc outlives recordings; the content script re-reports the
   // live value right after this, unless it can't detect one.
   micMuted = false;
+  micWanted = opts.withMic;
+
+  // Opened here before the session owns them, so a failure or a stop midway
+  // releases them too.
+  let tabStream: MediaStream | undefined;
+  let ctx: AudioContext | undefined;
+  const release = (): void => {
+    for (const t of tabStream?.getTracks() ?? []) t.stop();
+    ctx?.close().catch(() => {});
+  };
 
   try {
-    const tabStream = await captureTabStream(opts.streamId);
+    tabStream = await captureTabStream(opts.streamId);
+    if (gen !== generation) return release();
     const tabAudio = tabStream.getAudioTracks()[0];
     if (!tabAudio)
       throw new Error(
@@ -309,9 +348,10 @@ async function start(
       );
     tabAudio.enabled = true;
 
-    const ctx = new AudioContext();
+    ctx = new AudioContext();
     await ctx.resume().catch(() => {});
     await ctx.audioWorklet.addModule(chrome.runtime.getURL(WORKLET_URL));
+    if (gen !== generation) return release();
 
     const tabSource = ctx.createMediaStreamSource(new MediaStream([tabAudio]));
     tabSource.connect(ctx.destination); // unmute: user keeps hearing the meeting
@@ -332,11 +372,13 @@ async function start(
     };
 
     if (opts.withMic) await addMic();
+    if (gen !== generation) return;
 
     console.log(`[offscreen] streaming started (mic: ${session?.mic != null})`);
     sendState({ status: 'recording' });
   } catch (error) {
-    teardown();
+    if (session) teardown();
+    else release();
     const message = error instanceof Error ? error.message : String(error);
     console.error('[offscreen] start failed:', message);
     sendState({ status: 'idle', error: message });
@@ -344,6 +386,7 @@ async function start(
 }
 
 function stop(): void {
+  generation++;
   if (!session) return;
   console.log('[offscreen] stop requested');
   // Closing the sockets flushes the server; teardown stops the tracks/graph.
@@ -352,6 +395,7 @@ function stop(): void {
 }
 
 function teardown(): void {
+  generation++; // a start still in flight must not report "recording"
   if (!session) return;
   const s = session;
   session = null; // null first so the close handlers don't re-enter
@@ -381,11 +425,17 @@ chrome.runtime.onMessage.addListener((message: Message) => {
       stop();
       break;
     }
+    case 'OFFSCREEN_RESYNC': {
+      if (session) sendWords(session.tab, 'tab', 0);
+      if (session?.mic) sendWords(session.mic, 'mic', 0);
+      break;
+    }
   }
 });
 
 async function setMic(enabled: boolean): Promise<void> {
+  micWanted = enabled;
   if (!session) return;
-  if (enabled && !session.mic) await addMic();
-  else if (!enabled && session.mic) removeMic();
+  if (enabled) await addMic();
+  else removeMic();
 }

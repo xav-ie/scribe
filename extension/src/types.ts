@@ -54,6 +54,13 @@ interface OffscreenStop {
   target: 'offscreen';
 }
 
+// background -> offscreen: resend every stream's full transcript (the
+// background noticed missing words, e.g. after its worker restarted).
+interface OffscreenResync {
+  type: 'OFFSCREEN_RESYNC';
+  target: 'offscreen';
+}
+
 // background -> offscreen: add/remove the mic in the live audio graph when the
 // "capture microphone" toggle flips mid-recording (no stop/start needed).
 interface OffscreenSetMic {
@@ -62,16 +69,17 @@ interface OffscreenSetMic {
   enabled: boolean;
 }
 
-// offscreen -> background: the latest cumulative transcript from the stream.
-// `words` are stream-relative seconds; `captureStartEpoch` (wall-clock ms of
-// audio sample 0) lets the background line them up with the speaker timeline.
+// offscreen -> background: new words from a stream. They replace that stream's
+// words from index `from` on (only the last word sent before can still change).
+// Times are stream-relative seconds; `captureStartEpoch` (wall-clock ms of audio
+// sample 0) lets the background line them up with the speaker timeline.
 interface TranscriptUpdate {
   type: 'TRANSCRIPT_UPDATE';
   target: 'background';
   /** Which ASR stream this is from — the tab audio, or the local mic. */
   channel: 'tab' | 'mic';
+  from: number;
   words: Word[];
-  text: string;
   captureStartEpoch: number;
 }
 
@@ -117,6 +125,7 @@ export type Message =
   | StateUpdate
   | OffscreenStart
   | OffscreenStop
+  | OffscreenResync
   | OffscreenSetMic
   | SpeakerDiag
   | TranscriptUpdate

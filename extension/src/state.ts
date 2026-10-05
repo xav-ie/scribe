@@ -29,13 +29,22 @@ export async function getState(): Promise<RecState> {
   return (stored[KEY] as RecState | undefined) ?? INITIAL;
 }
 
-export async function setState(patch: Partial<RecState>): Promise<RecState> {
-  const next: RecState = {
-    ...(await getState()),
-    ...patch,
-    updatedAt: Date.now(),
-  };
-  await chrome.storage.local.set({ [KEY]: next });
+// Patches are applied one at a time: two overlapping read-modify-writes would
+// otherwise drop one of them (e.g. an error landing during a status change).
+// Only the background worker writes state, so one queue per context suffices.
+let writes: Promise<unknown> = Promise.resolve();
+
+export function setState(patch: Partial<RecState>): Promise<RecState> {
+  const next = writes.then(async () => {
+    const state: RecState = {
+      ...(await getState()),
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    await chrome.storage.local.set({ [KEY]: state });
+    return state;
+  });
+  writes = next.catch(() => {});
   return next;
 }
 
