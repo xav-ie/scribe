@@ -198,6 +198,11 @@ async function startRecording(): Promise<void> {
 
   await ensureOffscreenDocument();
 
+  // Detection first: it also yields the participants' names, which the
+  // streaming service boosts so they're transcribed right.
+  const detecting = await startSpeakerDetection(tab.id, platformOf(tab.url));
+  const boost = detecting === true ? await participantNames(tab.id) : [];
+
   chrome.runtime
     .sendMessage({
       type: 'OFFSCREEN_START',
@@ -208,12 +213,27 @@ async function startRecording(): Promise<void> {
       debug: settings.debug,
       sessionId,
       saveAudio: settings.saveAudio,
+      boost,
     } satisfies Message)
     .catch(() => {});
 
-  const detecting = await startSpeakerDetection(tab.id, platformOf(tab.url));
   if (detecting !== true) await setState({ warning: detecting });
   uploadUnsent().catch(() => {});
+}
+
+// Only the frame showing participant tiles answers (Zoom's meeting runs in an
+// iframe), so the reply comes from where the names are; none answering means
+// no names yet.
+async function participantNames(tabId: number): Promise<string[]> {
+  try {
+    const reply = (await chrome.tabs.sendMessage(tabId, {
+      type: 'GET_PARTICIPANTS',
+      target: 'content',
+    } satisfies Message)) as { names?: string[] } | undefined;
+    return reply?.names ?? [];
+  } catch {
+    return [];
+  }
 }
 
 const SPEAKER_PLATFORMS = new Set(['meet', 'zoom']);

@@ -47,6 +47,8 @@ interface OffscreenStart {
   /** Identifies this recording on the streaming service (and its saved audio). */
   sessionId: string;
   saveAudio: boolean;
+  /** Participant names for the streaming service to boost. */
+  boost: string[];
 }
 
 interface OffscreenStop {
@@ -118,6 +120,13 @@ interface ResetSpeaker {
   target: 'content';
 }
 
+// background -> content script: the participants' display names. Only a frame
+// that sees participant tiles answers.
+interface GetParticipants {
+  type: 'GET_PARTICIPANTS';
+  target: 'content';
+}
+
 export type Message =
   | StartRecording
   | RetryUploads
@@ -131,6 +140,7 @@ export type Message =
   | TranscriptUpdate
   | SpeakerEvent
   | MuteState
-  | ResetSpeaker;
+  | ResetSpeaker
+  | GetParticipants;
 
 export type RecordingStatus = 'idle' | 'recording';

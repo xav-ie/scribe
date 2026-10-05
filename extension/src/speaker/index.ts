@@ -88,6 +88,10 @@ function start(adapter: SpeakerAdapter): void {
         if (current) emit(current);
         sendResponse({ platform: adapter.platform });
       }
+      if (message.target === 'content' && message.type === 'GET_PARTICIPANTS') {
+        const { tiles, names } = adapter.diagnose();
+        if (tiles > 0) sendResponse({ names: names.filter((n) => n !== '?') });
+      }
     },
   );
 

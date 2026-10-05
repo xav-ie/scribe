@@ -54,6 +54,8 @@ interface StreamOpts {
   /** Names the recording on the streaming service, which saves audio under it. */
   sessionId: string;
   saveAudio: boolean;
+  /** Participant names the streaming service should boost. */
+  boost: string[];
 }
 
 let session: Session | null = null;
@@ -186,6 +188,7 @@ function openChannel(
         sessionId: stream.sessionId,
         channel: channelName,
         save: stream.saveAudio,
+        boost: stream.boost,
       }),
     );
     if (debug) {
@@ -324,9 +327,6 @@ async function start(
 ): Promise<void> {
   if (session) return;
   const gen = ++generation;
-  // The offscreen doc outlives recordings; the content script re-reports the
-  // live value right after this, unless it can't detect one.
-  micMuted = false;
   micWanted = opts.withMic;
 
   // Opened here before the session owns them, so a failure or a stop midway
@@ -361,6 +361,7 @@ async function start(
       debug: opts.debug,
       sessionId: opts.sessionId,
       saveAudio: opts.saveAudio,
+      boost: opts.boost,
     };
     session = {
       ctx,
@@ -396,6 +397,9 @@ function stop(): void {
 
 function teardown(): void {
   generation++; // a start still in flight must not report "recording"
+  // The offscreen doc outlives recordings; the next one starts unmuted unless
+  // the content script reports otherwise (it does just before each start).
+  micMuted = false;
   if (!session) return;
   const s = session;
   session = null; // null first so the close handlers don't re-enter
