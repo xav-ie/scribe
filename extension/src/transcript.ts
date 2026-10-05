@@ -43,11 +43,12 @@ export interface Channel {
 
 const UNKNOWN_SPEAKER = 'Unknown';
 
-// The active-speaker UI lags real speech by a debounce (~0.4-0.7s) — the
-// indicator lights up slightly AFTER someone starts talking. So to find the
-// speaker for a word spoken at wall-clock T, we look at the timeline a bit
-// later, where the UI had caught up. Tune against real meetings.
-const DEFAULT_SPEAKER_LEAD_MS = 500;
+// The active-speaker UI lights up a little AFTER someone starts talking, so to
+// find the speaker for a word spoken at wall-clock T, we look at the timeline a
+// bit later, where the UI had caught up. 900 ms best matched TitaNet voiceprints
+// of words near speaker changes in a 3-person Zoom call (91% vs 86% at 500 ms);
+// the voiceprints agreed with Zoom on every confident mid-turn word.
+const DEFAULT_SPEAKER_LEAD_MS = 900;
 
 /** The active speaker at a given wall-clock epoch. Timeline must be sorted by `from`. */
 function speakerAt(timeline: readonly SpeakerSpan[], epoch: number): string {
