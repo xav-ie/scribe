@@ -13,6 +13,10 @@ export interface SpeakerDiagnostics {
   names: string[];
   /** Who it currently thinks is speaking, or null. */
   speaking: string | null;
+  /** Recent speaking activity per participant, where the adapter measures it. */
+  rates?: Record<string, number>;
+  /** The local user's detected mute state (null: can't tell). */
+  muted?: boolean | null;
   /** Page map attached while the adapter finds no tiles (see domProbe). */
   probe?: DomProbe;
 }

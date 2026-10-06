@@ -118,6 +118,7 @@ function start(adapter: SpeakerAdapter): void {
   let probes = 0;
   const snapshot = (): void => {
     const diag = adapter.diagnose();
+    diag.muted = adapter.isMuted?.() ?? null;
     foundTiles ||= diag.tiles > 0;
     if (!isTop && !foundTiles) return;
     if (isTop && diag.tiles === 0 && probes < MAX_PROBES) {

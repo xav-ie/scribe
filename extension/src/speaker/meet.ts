@@ -8,7 +8,7 @@
 // speaking participant's audio meter is a LEAF, text-less <div> whose `class`
 // mutates rapidly while they talk (~7/s) — far faster than anything idle.
 //
-// So: observe the grid for `class` mutations on leaf+empty nodes (excludes hover
+// So: observe the page for `class` mutations on leaf+empty nodes (excludes hover
 // tooltips, which carry children + text), count them PER ELEMENT in a short
 // window, and emit the tile of the single highest-rate element above a threshold
 // (excludes hover chrome — a leaf <span> that only blips ~1/s when you mouse
@@ -43,12 +43,9 @@ function isMeter(el: HTMLElement): boolean {
   );
 }
 
-// The grid mounts asynchronously; it's two levels up from the first tile.
-function gridRoot(): Element | null {
-  return document.querySelector(TILE)?.parentElement?.parentElement ?? null;
-}
-
 let lastDetected: string | null = null;
+// Per tile, the meter's mutation count in the last window: what detection saw.
+let lastRates: Record<string, number> = {};
 
 export const meetAdapter: SpeakerAdapter = {
   platform: 'meet',
@@ -56,60 +53,54 @@ export const meetAdapter: SpeakerAdapter = {
 
   start(onSpeaker) {
     const counts = new Map<HTMLElement, number>();
-    let observer: MutationObserver | null = null;
-    let tick: ReturnType<typeof setInterval> | undefined;
-
-    const attach = (root: Element) => {
-      observer = new MutationObserver((mutations) => {
-        for (const m of mutations) {
-          const t = m.target;
-          if (!(t instanceof HTMLElement) || !isMeter(t)) continue;
-          if (!t.closest(TILE)) continue;
-          counts.set(t, (counts.get(t) ?? 0) + 1);
-        }
-      });
-      observer.observe(root, {
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['class'],
-      });
-
-      tick = setInterval(() => {
-        // The single fastest-animating element wins — the speaker's meter, not
-        // the slow one-off blips from hovering a tile.
-        let best: HTMLElement | null = null;
-        let bestN = 0;
-        for (const [el, n] of counts) {
-          if (n > bestN) {
-            best = el;
-            bestN = n;
-          }
-        }
-        counts.clear();
-        if (best && bestN >= MUTATION_THRESHOLD) {
-          const tile = best.closest(TILE);
-          const name = tile && tileName(tile);
-          if (name) {
-            lastDetected = name;
-            onSpeaker(name);
-          }
-        }
-      }, WINDOW_MS);
-    };
-
-    let boot: ReturnType<typeof setInterval> | undefined = setInterval(() => {
-      const root = gridRoot();
-      if (root) {
-        clearInterval(boot);
-        boot = undefined;
-        attach(root);
+    // Watch the whole page, not the grid: Meet rebuilds the grid when people
+    // join or someone presents, so a root picked at join time goes stale and
+    // hides everyone who arrived later. Cheap checks first; offsetParent forces
+    // layout, so it runs last.
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        const t = m.target;
+        if (!(t instanceof HTMLElement) || t.childElementCount !== 0) continue;
+        if (!t.closest(TILE) || !isMeter(t)) continue;
+        counts.set(t, (counts.get(t) ?? 0) + 1);
       }
-    }, 500);
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+
+    const tick = setInterval(() => {
+      // The single fastest-animating element wins — the speaker's meter, not
+      // the slow one-off blips from hovering a tile.
+      let best: HTMLElement | null = null;
+      let bestN = 0;
+      const rates: Record<string, number> = {};
+      for (const [el, n] of counts) {
+        const tile = el.closest(TILE);
+        const name = (tile && tileName(tile)) ?? '?';
+        rates[name] = Math.max(rates[name] ?? 0, n);
+        if (n > bestN) {
+          best = el;
+          bestN = n;
+        }
+      }
+      counts.clear();
+      lastRates = rates;
+      if (best && bestN >= MUTATION_THRESHOLD) {
+        const tile = best.closest(TILE);
+        const name = tile && tileName(tile);
+        if (name) {
+          lastDetected = name;
+          onSpeaker(name);
+        }
+      }
+    }, WINDOW_MS);
 
     return () => {
-      if (boot) clearInterval(boot);
-      if (tick) clearInterval(tick);
-      observer?.disconnect();
+      clearInterval(tick);
+      observer.disconnect();
     };
   },
 
@@ -138,6 +129,7 @@ export const meetAdapter: SpeakerAdapter = {
       tiles: tiles.length,
       names: tiles.map((t) => tileName(t) ?? '?'),
       speaking: lastDetected,
+      rates: lastRates,
     };
   },
 };
