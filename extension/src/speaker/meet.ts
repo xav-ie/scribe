@@ -14,6 +14,10 @@
 // (excludes hover chrome — a leaf <span> that only blips ~1/s when you mouse
 // over a tile). Token-independent: keys on the animation, not its hashed name.
 // Only the structural `[data-participant-id]` tile + name wrapper are hardcoded.
+//
+// When the tab loses focus Meet can pop the call out into a Document
+// Picture-in-Picture window, moving the tiles and controls into that window's
+// own document, so detection and the mute check cover it too.
 
 import type { SpeakerAdapter, SpeakerDiagnostics } from './types';
 
@@ -43,6 +47,37 @@ function isMeter(el: HTMLElement): boolean {
   );
 }
 
+// Document Picture-in-Picture isn't in TypeScript's DOM lib yet.
+interface DocumentPictureInPictureEvent extends Event {
+  readonly window: Window;
+}
+interface DocumentPictureInPicture {
+  readonly window: Window | null;
+  addEventListener(
+    type: 'enter',
+    listener: (e: DocumentPictureInPictureEvent) => void,
+  ): void;
+  removeEventListener(
+    type: 'enter',
+    listener: (e: DocumentPictureInPictureEvent) => void,
+  ): void;
+}
+declare global {
+  var documentPictureInPicture: DocumentPictureInPicture | undefined;
+}
+
+// The page, plus Meet's picture-in-picture window while it's open.
+function meetingDocuments(): Document[] {
+  const pip = globalThis.documentPictureInPicture?.window?.document;
+  return pip ? [document, pip] : [document];
+}
+
+function queryAll<E extends Element>(selector: string): E[] {
+  return meetingDocuments().flatMap((d) => [
+    ...d.querySelectorAll<E>(selector),
+  ]);
+}
+
 let lastDetected: string | null = null;
 // Per tile, the meter's mutation count in the last window: what detection saw.
 let lastRates: Record<string, number> = {};
@@ -56,20 +91,30 @@ export const meetAdapter: SpeakerAdapter = {
     // Watch the whole page, not the grid: Meet rebuilds the grid when people
     // join or someone presents, so a root picked at join time goes stale and
     // hides everyone who arrived later. Cheap checks first; offsetParent forces
-    // layout, so it runs last.
+    // layout, so it runs last. Nodes in the picture-in-picture window belong to
+    // its own realm, where `instanceof HTMLElement` is false, hence nodeType.
     const observer = new MutationObserver((mutations) => {
       for (const m of mutations) {
-        const t = m.target;
-        if (!(t instanceof HTMLElement) || t.childElementCount !== 0) continue;
+        const t = m.target as HTMLElement;
+        if (t.nodeType !== Node.ELEMENT_NODE || t.childElementCount !== 0)
+          continue;
         if (!t.closest(TILE) || !isMeter(t)) continue;
         counts.set(t, (counts.get(t) ?? 0) + 1);
       }
     });
-    observer.observe(document.body, {
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['class'],
-    });
+    const watch = (doc: Document): void => {
+      observer.observe(doc.body, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class'],
+      });
+    };
+    for (const doc of meetingDocuments()) watch(doc);
+    // A closed window's document is gone, and its observation with it.
+    const onPip = (e: DocumentPictureInPictureEvent): void => {
+      watch(e.window.document);
+    };
+    globalThis.documentPictureInPicture?.addEventListener('enter', onPip);
 
     const tick = setInterval(() => {
       // The single fastest-animating element wins — the speaker's meter, not
@@ -101,6 +146,7 @@ export const meetAdapter: SpeakerAdapter = {
     return () => {
       clearInterval(tick);
       observer.disconnect();
+      globalThis.documentPictureInPicture?.removeEventListener('enter', onPip);
     };
   },
 
@@ -110,9 +156,7 @@ export const meetAdapter: SpeakerAdapter = {
   // Other microphone-labelled controls (device pickers) are ignored.
   // ⚠️ TUNE ME if Meet changes these — null means "don't gate the mic".
   isMuted(): boolean | null {
-    const labelled = [
-      ...document.querySelectorAll<HTMLElement>('[aria-label*="microphone" i]'),
-    ];
+    const labelled = queryAll<HTMLElement>('[aria-label*="microphone" i]');
     const flag = labelled.find((el) => el.dataset.isMuted !== undefined)
       ?.dataset.isMuted;
     if (flag !== undefined) return flag === 'true';
@@ -124,7 +168,7 @@ export const meetAdapter: SpeakerAdapter = {
   },
 
   diagnose(): SpeakerDiagnostics {
-    const tiles = [...document.querySelectorAll(TILE)];
+    const tiles = queryAll(TILE);
     return {
       tiles: tiles.length,
       names: tiles.map((t) => tileName(t) ?? '?'),
