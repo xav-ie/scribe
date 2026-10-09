@@ -49,6 +49,8 @@ interface OffscreenStart {
   saveAudio: boolean;
   /** Participant names for the streaming service to boost. */
   boost: string[];
+  /** The captured tab: only its mute reports gate the mic. */
+  tabId: number;
 }
 
 interface OffscreenStop {

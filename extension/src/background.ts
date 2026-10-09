@@ -214,6 +214,7 @@ async function startRecording(): Promise<void> {
       sessionId,
       saveAudio: settings.saveAudio,
       boost,
+      tabId: tab.id,
     } satisfies Message)
     .catch(() => {});
 

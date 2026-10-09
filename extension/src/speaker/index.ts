@@ -64,8 +64,11 @@ function start(adapter: SpeakerAdapter): void {
 
   // Poll the local user's mute state and report changes; the offscreen streams
   // silence (no recording) while muted. null = can't detect → don't gate.
+  // Only a frame showing the meeting's participants reports: other frames of
+  // the tab can hold mic-labelled controls that aren't the meeting's own.
   let lastMuted: boolean | null = null;
   const reportMuted = (): void => {
+    if (adapter.diagnose().tiles === 0) return;
     const muted = adapter.isMuted?.() ?? null;
     if (muted === null || muted === lastMuted) return;
     lastMuted = muted;

@@ -70,10 +70,15 @@ let generation = 0;
 let micWanted = false;
 let micOpening = false;
 
-// While true, the mic streams silence — you're muted, so it isn't recorded.
-// Lives outside the session so a report that lands while start() is still
-// awaiting capture isn't lost.
-let micMuted = false;
+// Each meeting tab's last reported mute state. While the captured tab's is
+// true, the mic streams silence: you're muted, so it isn't recorded. Keyed by
+// tab because every meeting tab reports (a second Meet tab with its mic off
+// must not silence this one), and kept outside the session so a report that
+// lands before start() knows its tab isn't lost.
+const mutedByTab = new Map<number, boolean>();
+let captureTabId: number | null = null;
+const micMuted = (): boolean =>
+  captureTabId !== null && mutedByTab.get(captureTabId) === true;
 
 function sendState(patch: Partial<RecState>): void {
   chrome.runtime
@@ -245,7 +250,7 @@ function openChannel(
     // While muted, stream silence on the mic channel: your voice never leaves
     // the machine and isn't transcribed, but the stream stays time-aligned.
     const pcm =
-      channelName === 'mic' && micMuted
+      channelName === 'mic' && micMuted()
         ? new Int16Array(data.length).buffer
         : floatToInt16(data);
     ws.send(pcm);
@@ -323,10 +328,11 @@ function removeMic(): void {
 }
 
 async function start(
-  opts: StreamOpts & { streamId: string; withMic: boolean },
+  opts: StreamOpts & { streamId: string; withMic: boolean; tabId: number },
 ): Promise<void> {
   if (session) return;
   const gen = ++generation;
+  captureTabId = opts.tabId;
   micWanted = opts.withMic;
 
   // Opened here before the session owns them, so a failure or a stop midway
@@ -399,7 +405,8 @@ function teardown(): void {
   generation++; // a start still in flight must not report "recording"
   // The offscreen doc outlives recordings; the next one starts unmuted unless
   // the content script reports otherwise (it does just before each start).
-  micMuted = false;
+  mutedByTab.clear();
+  captureTabId = null;
   if (!session) return;
   const s = session;
   session = null; // null first so the close handlers don't re-enter
@@ -410,7 +417,7 @@ function teardown(): void {
   s.ctx.close().catch(() => {});
 }
 
-chrome.runtime.onMessage.addListener((message: Message) => {
+chrome.runtime.onMessage.addListener((message: Message, sender) => {
   if (message.target !== 'offscreen') return;
   switch (message.type) {
     case 'OFFSCREEN_START': {
@@ -422,7 +429,8 @@ chrome.runtime.onMessage.addListener((message: Message) => {
       break;
     }
     case 'MUTE_STATE': {
-      micMuted = message.muted;
+      if (sender.tab?.id !== undefined)
+        mutedByTab.set(sender.tab.id, message.muted);
       break;
     }
     case 'OFFSCREEN_STOP': {
