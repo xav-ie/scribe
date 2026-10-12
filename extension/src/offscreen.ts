@@ -76,6 +76,7 @@ let micOpening = false;
 // must not silence this one), and kept outside the session so a report that
 // lands before start() knows its tab isn't lost.
 const mutedByTab = new Map<number, boolean>();
+const SILENT_MIC_SECONDS = 20;
 let captureTabId: number | null = null;
 const micMuted = (): boolean =>
   captureTabId !== null && mutedByTab.get(captureTabId) === true;
@@ -239,6 +240,12 @@ function openChannel(
     }
   });
 
+  // Samples of unbroken digital silence from the mic while not muted: a device
+  // that delivers nothing (wrong input, or an OS-level mute), not a quiet room,
+  // which still carries noise.
+  let zeroSamples = 0;
+  let warnedSilent = false;
+
   node.port.addEventListener('message', (e: MessageEvent) => {
     if (!session || ws.readyState !== WebSocket.OPEN) return;
     if (channel.captureStartEpoch === null) {
@@ -249,11 +256,20 @@ function openChannel(
     const data = e.data as Float32Array;
     // While muted, stream silence on the mic channel: your voice never leaves
     // the machine and isn't transcribed, but the stream stays time-aligned.
-    const pcm =
-      channelName === 'mic' && micMuted()
-        ? new Int16Array(data.length).buffer
-        : floatToInt16(data);
+    const gated = channelName === 'mic' && micMuted();
+    const pcm = gated ? new Int16Array(data.length).buffer : floatToInt16(data);
     ws.send(pcm);
+    if (channelName === 'mic' && !gated && !warnedSilent) {
+      zeroSamples = data.every((x) => x === 0) ? zeroSamples + data.length : 0;
+      if (zeroSamples >= ctx.sampleRate * SILENT_MIC_SECONDS) {
+        warnedSilent = true;
+        const device = session.micStream?.getAudioTracks()[0]?.label;
+        const which = device ? ` (${device})` : '';
+        sendState({
+          warning: `Your microphone${which} is sending pure silence, so your voice isn't being transcribed. Check the input device in your system settings, then restart the recording.`,
+        });
+      }
+    }
   });
   node.port.start();
 
@@ -308,6 +324,19 @@ async function addMic(): Promise<void> {
   }
   const micSource = session.ctx.createMediaStreamSource(micStream);
   session.micStream = micStream;
+  const track = micStream.getAudioTracks()[0];
+  const settings = track?.getSettings() ?? {};
+  sendState({
+    micDevice: `${track?.label || 'unknown device'} (${JSON.stringify({
+      deviceId: settings.deviceId,
+      groupId: settings.groupId,
+      sampleRate: settings.sampleRate,
+      channelCount: settings.channelCount,
+      echoCancellation: settings.echoCancellation,
+      muted: track?.muted,
+      readyState: track?.readyState,
+    })})`,
+  });
   session.mic = openChannel(
     session.ctx,
     micSource,

@@ -167,6 +167,7 @@ async function startRecording(): Promise<void> {
     rawText: '',
     error: undefined,
     warning: undefined,
+    micDevice: undefined,
   });
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {

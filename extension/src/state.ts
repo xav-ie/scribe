@@ -16,6 +16,8 @@ export interface RecState {
   error?: string;
   /** Recording works but something is degraded (e.g. no speaker detection). */
   warning?: string;
+  /** The input device the mic stream opened and its settings, for debugging. */
+  micDevice?: string;
   updatedAt: number;
 }
 
