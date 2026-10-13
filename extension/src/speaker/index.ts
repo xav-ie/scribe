@@ -77,6 +77,18 @@ function start(adapter: SpeakerAdapter): void {
   };
   timers.push(setInterval(reportMuted, 500));
 
+  // The mic the meeting itself opened, recorded on <html> by public/mic-hook.js
+  // from the page's own world. Reported on change and at each start, like mute.
+  let lastMic: string | null = null;
+  const reportMic = (): void => {
+    const label = document.documentElement.dataset.meetingCaptureMic;
+    if (!label || label === lastMic) return;
+    lastMic = label;
+    dlog('[speaker] meeting mic:', label);
+    send({ type: 'MEETING_MIC', target: 'offscreen', label });
+  };
+  document.addEventListener('meeting-capture:mic', reportMic);
+
   // A fresh recording resets the timeline; re-emit the current speaker + mute
   // state so both are seeded from the start (force past the dedupe). Mute is
   // reported immediately, before the mic stream finishes opening.
@@ -88,6 +100,8 @@ function start(adapter: SpeakerAdapter): void {
         last = null;
         lastMuted = null;
         reportMuted();
+        lastMic = null;
+        reportMic();
         if (current) emit(current);
         sendResponse({ platform: adapter.platform });
       }

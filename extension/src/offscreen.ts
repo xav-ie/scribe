@@ -76,6 +76,11 @@ let micOpening = false;
 // must not silence this one), and kept outside the session so a report that
 // lands before start() knows its tab isn't lost.
 const mutedByTab = new Map<number, boolean>();
+// Each meeting tab's mic as the page opened it, by label (device ids differ per
+// origin; labels don't). The recording's mic opens the captured tab's, and
+// follows it when the meeting switches mics.
+const meetingMicByTab = new Map<number, string>();
+let micOpenedFor: string | undefined;
 const SILENT_MIC_SECONDS = 20;
 let captureTabId: number | null = null;
 const micMuted = (): boolean =>
@@ -125,15 +130,39 @@ async function captureTabStream(streamId: string): Promise<MediaStream> {
 // doc can't prompt. Returns null (and warns) if it isn't granted. Echo
 // cancellation keeps meeting audio from the speakers out of the mic stream,
 // which would otherwise transcribe remote speech a second time as "Me".
-async function openMicStream(): Promise<MediaStream | null> {
+// The device is the meeting's own mic when it's known, else the system default
+// ('default'). Both are `exact`: an unset or merely preferred deviceId lets
+// Chrome pick the top of its own ranking of mics chosen in sites before, which
+// can be a virtual device (BlackHole) that's silent unless something feeds it.
+async function micDeviceId(label: string | undefined): Promise<string> {
+  if (!label) return 'default';
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return (
+    devices.find((d) => d.kind === 'audioinput' && d.label === label)
+      ?.deviceId ?? 'default'
+  );
+}
+
+const openMic = (deviceId: string): Promise<MediaStream> =>
+  navigator.mediaDevices.getUserMedia({
+    audio: {
+      deviceId: { exact: deviceId },
+      echoCancellation: true,
+      noiseSuppression: false,
+      autoGainControl: false,
+    },
+    video: false,
+  });
+
+async function openMicStream(
+  label: string | undefined,
+): Promise<MediaStream | null> {
   try {
-    return await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
-      video: false,
+    const deviceId = await micDeviceId(label);
+    // The meeting's mic can be unplugged between its report and now.
+    return await openMic(deviceId).catch((error: unknown) => {
+      if (deviceId === 'default') throw error;
+      return openMic('default');
     });
   } catch (error) {
     console.warn('[offscreen] mic capture failed', error);
@@ -313,7 +342,9 @@ function closeChannel(ch: Channel): void {
 async function addMic(): Promise<void> {
   if (!session || session.mic || micOpening) return;
   micOpening = true;
-  const micStream = await openMicStream().finally(() => {
+  const label =
+    captureTabId === null ? undefined : meetingMicByTab.get(captureTabId);
+  const micStream = await openMicStream(label).finally(() => {
     micOpening = false;
   });
   if (!micStream) return;
@@ -324,6 +355,7 @@ async function addMic(): Promise<void> {
   }
   const micSource = session.ctx.createMediaStreamSource(micStream);
   session.micStream = micStream;
+  micOpenedFor = label;
   const track = micStream.getAudioTracks()[0];
   const settings = track?.getSettings() ?? {};
   sendState({
@@ -353,6 +385,7 @@ function removeMic(): void {
   for (const t of session.micStream?.getTracks() ?? []) t.stop();
   session.mic = null;
   session.micStream = null;
+  micOpenedFor = undefined;
   console.log('[offscreen] mic removed');
 }
 
@@ -435,6 +468,7 @@ function teardown(): void {
   // The offscreen doc outlives recordings; the next one starts unmuted unless
   // the content script reports otherwise (it does just before each start).
   mutedByTab.clear();
+  meetingMicByTab.clear();
   captureTabId = null;
   if (!session) return;
   const s = session;
@@ -455,6 +489,21 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
     }
     case 'OFFSCREEN_SET_MIC': {
       void setMic(message.enabled);
+      break;
+    }
+    case 'MEETING_MIC': {
+      const tab = sender.tab?.id;
+      if (tab === undefined) break;
+      meetingMicByTab.set(tab, message.label);
+      // The meeting switched mics mid-recording: follow it.
+      if (
+        tab === captureTabId &&
+        session?.mic &&
+        micOpenedFor !== message.label
+      ) {
+        removeMic();
+        void addMic();
+      }
       break;
     }
     case 'MUTE_STATE': {

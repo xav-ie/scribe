@@ -499,8 +499,31 @@ chrome.runtime.onSuspend.addListener(() => {
   flushSession().catch(() => {});
 });
 
+// public/mic-hook.js must run in the meeting page's own world before the page
+// asks for a mic, which a manifest content script can't do with CRXJS's loader,
+// so it's registered here. Install and update both land here.
+const MIC_HOOK = 'mic-hook';
+async function registerMicHook(): Promise<void> {
+  await chrome.scripting
+    .unregisterContentScripts({ ids: [MIC_HOOK] })
+    .catch(() => {});
+  await chrome.scripting.registerContentScripts([
+    {
+      id: MIC_HOOK,
+      js: ['mic-hook.js'],
+      matches: ['https://meet.google.com/*', 'https://*.zoom.us/*'],
+      world: 'MAIN',
+      runAt: 'document_start',
+      allFrames: true,
+    },
+  ]);
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   reconcileStaleState().catch(() => {});
+  registerMicHook().catch((error: unknown) => {
+    console.warn('[bg] mic hook registration failed:', errorMessage(error));
+  });
 });
 chrome.runtime.onStartup.addListener(() => {
   reconcileStaleState().catch(() => {});

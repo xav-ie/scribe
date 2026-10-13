@@ -114,6 +114,14 @@ interface MuteState {
   muted: boolean;
 }
 
+// content script -> offscreen: the mic the meeting page opened, by label, so the
+// recording captures the same one.
+interface MeetingMic {
+  type: 'MEETING_MIC';
+  target: 'offscreen';
+  label: string;
+}
+
 // background -> content script (the captured tab): a new recording started, so
 // forget the last-seen speaker and re-emit whoever is currently active, seeding
 // the timeline from the very first word.
@@ -142,6 +150,7 @@ export type Message =
   | TranscriptUpdate
   | SpeakerEvent
   | MuteState
+  | MeetingMic
   | ResetSpeaker
   | GetParticipants;
 
