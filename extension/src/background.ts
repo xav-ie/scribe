@@ -189,6 +189,15 @@ async function startRecording(): Promise<void> {
 
   const settings = await getSettings();
 
+  await ensureOffscreenDocument();
+
+  // Detection first: it also yields the participants' names, which the
+  // streaming service boosts so they're transcribed right.
+  const detecting = await startSpeakerDetection(tab.id, platformOf(tab.url));
+  const boost = detecting === true ? await participantNames(tab.id) : [];
+
+  // Last, right before it's used: the capture id goes stale within seconds,
+  // and injecting detection into a tab that missed it can take that long.
   const streamId = await new Promise<string>((resolve, reject) => {
     chrome.tabCapture.getMediaStreamId({ targetTabId: tab.id }, (id) => {
       const err = chrome.runtime.lastError;
@@ -196,13 +205,6 @@ async function startRecording(): Promise<void> {
       else resolve(id);
     });
   });
-
-  await ensureOffscreenDocument();
-
-  // Detection first: it also yields the participants' names, which the
-  // streaming service boosts so they're transcribed right.
-  const detecting = await startSpeakerDetection(tab.id, platformOf(tab.url));
-  const boost = detecting === true ? await participantNames(tab.id) : [];
 
   chrome.runtime
     .sendMessage({
@@ -218,6 +220,10 @@ async function startRecording(): Promise<void> {
       tabId: tab.id,
     } satisfies Message)
     .catch(() => {});
+  clearTimeout(startTimer);
+  startTimer = setTimeout(() => {
+    failSilentStart().catch(() => {});
+  }, START_TIMEOUT_MS);
 
   if (detecting !== true) await setState({ warning: detecting });
   uploadUnsent().catch(() => {});
@@ -236,6 +242,29 @@ async function participantNames(tabId: number): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+// The offscreen confirms a start (status 'recording') or reports why it failed.
+// Hearing neither means the capture never came up, which must not pass for a
+// recording: the popup would say "recording" while nothing is.
+const START_TIMEOUT_MS = 15_000;
+let startTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function failSilentStart(): Promise<void> {
+  const { status } = await getState();
+  if (status !== 'recording') return;
+  chrome.runtime
+    .sendMessage({
+      type: 'OFFSCREEN_STOP',
+      target: 'offscreen',
+    } satisfies Message)
+    .catch(() => {});
+  await setState({
+    status: 'idle',
+    error:
+      "The recording didn't start: the audio capture never came up. Start it again.",
+  });
+  await finishSession();
 }
 
 const SPEAKER_PLATFORMS = new Set(['meet', 'zoom']);
@@ -454,6 +483,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
       break;
     }
     case 'STATE_UPDATE': {
+      if (message.patch.status !== undefined) clearTimeout(startTimer);
       setState(message.patch).catch(() => {});
       if (message.patch.status === 'idle') finishSession().catch(() => {});
       break;
