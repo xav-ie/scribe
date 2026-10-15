@@ -61,7 +61,12 @@ const SHIFTED: Record<string, string> = {
 };
 
 export type Phase =
-  "idle" | "pending" | "hold" | "toggle" | "finishing" | "error";
+  | "idle"
+  | "pending"
+  | "hold"
+  | "toggle"
+  | "finishing"
+  | "error";
 
 export const [phase, setPhase] = createState<Phase>("idle");
 export const [label, setLabel] = createState("");
