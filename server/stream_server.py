@@ -30,6 +30,8 @@ Tunables (set by the Nix module via env):
   SCRIBE_BOOST_SCORE  per-token boost inside a phrase (default 1.0; 3.0 began
                       forcing names into ordinary words in testing)
   SCRIBE_BOOST_ALPHA  weight of the boost in decoding (default 1.0)
+  SCRIBE_ALLOWED_HOSTS  comma-separated host names the server answers to (e.g.
+                      scribe.example.com,localhost); unset answers any Host
 
 A stream's first text message is {"sampleRate", "sessionId", "channel", "save",
 "boost"}; "boost" (participant names) is boosted along with the vocabulary.
@@ -55,6 +57,7 @@ import logging
 import math
 import os
 import re
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -89,6 +92,7 @@ from nemo.collections.asr.parts.utils.streaming_utils import (
 from nemo.utils import logging as nemo_logging
 from omegaconf import OmegaConf, open_dict
 from scipy.signal import resample_poly
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # NeMo logs the full model config on load — pages of noise. Keep WARNING and up.
 nemo_logging.set_verbosity(logging.WARNING)
@@ -123,6 +127,9 @@ BOOST_ALPHA = float(os.environ.get("SCRIBE_BOOST_ALPHA", "1.0"))
 # The global boost list (product names, jargon, people), edited in the UI.
 VOCAB = Path(os.environ.get("SCRIBE_VOCAB", "/cache/vocab.json"))
 MAX_PHRASES = 2000
+# vocab.json is read, changed and written from worker threads (the UI's PUT,
+# the MCP tools); one change at a time.
+_vocab_lock = threading.Lock()
 MAX_PHRASE_LEN = 100
 RECORDINGS = Path(os.environ.get("SCRIBE_RECORDINGS", "/cache/recordings"))
 # The session id becomes a directory name, so only accept a UUID.
@@ -190,6 +197,22 @@ if model.cfg.encoder.att_context_style == "chunked_limited_with_rc":
     )
 
 app = FastAPI()
+# scribe has no authentication (see the README). Listing the names it is served
+# under refuses requests for any other Host, which stops DNS rebinding: a web
+# page whose own hostname resolves to this server.
+ALLOWED_HOSTS = [h for h in os.environ.get("SCRIBE_ALLOWED_HOSTS", "").split(",") if h]
+if ALLOWED_HOSTS:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+
+def _cross_site(websocket):
+    """A browser page on another site opening this socket. Browsers don't apply
+    CORS to WebSockets; extensions and non-browser clients are fine."""
+    origin = websocket.headers.get("origin")
+    if not origin or not origin.startswith(("http://", "https://")):
+        return False
+    return origin.split("://", 1)[1] != websocket.headers.get("host")
+
 
 # Serialize GPU calls — one model, one GPU. Each socket keeps its own state.
 _gpu_lock = asyncio.Lock()
@@ -647,6 +670,10 @@ async def put_session(session_id: str, request: Request):
     """The extension's record of a finished recording: transcript, speaker
     timeline, per-stream words and clocks, adapter snapshots."""
     folder = _session_dir(session_id)
+    # A JSON content type can't be sent cross-site without a CORS preflight,
+    # which scribe never grants, so other sites can't plant records.
+    if request.headers.get("content-type", "").split(";")[0] != "application/json":
+        raise HTTPException(415)
     record = await _json_body(request, MAX_SESSION_BYTES)
     if not isinstance(record, dict):
         raise HTTPException(400)
@@ -668,7 +695,12 @@ def read_vocab():
 async def put_vocab(request: Request):
     body = await _json_body(request, MAX_VOCAB_BYTES)
     phrases = _clean_phrases(body.get("phrases") if isinstance(body, dict) else None)
-    await asyncio.to_thread(_write_json, VOCAB, phrases)
+
+    def save():
+        with _vocab_lock:
+            _write_json(VOCAB, phrases)
+
+    await asyncio.to_thread(save)
     return {"phrases": phrases}
 
 
@@ -682,6 +714,9 @@ def get_audio(session_id: str, stem: str):
 
 @app.websocket("/ws")
 async def ws(websocket: WebSocket):
+    if _cross_site(websocket):
+        await websocket.close(1008)
+        return
     await websocket.accept()
     state = StreamState()
     recording = None
@@ -829,13 +864,16 @@ async def ws(websocket: WebSocket):
             streams.pop(stream_id, None)
             if not streams:
                 LIVE.pop(live[0], None)
-            _publish(live[0], {"type": "closed", "stream": stream_id})
 
         async def cleanup():
             if recording is not None:
                 # Keep the tail shorter than one step too, so the file is complete.
                 tail = _to_16k(state.pending, src_rate)
                 await asyncio.to_thread(recording.close, state.words, tail)
+            # After the recording is complete, so a watcher reloading the
+            # session on "closed" finds its words and a final FLAC.
+            if live is not None:
+                _publish(live[0], {"type": "closed", "stream": stream_id})
             async with _gpu_lock:
                 await asyncio.to_thread(state.close)
 
@@ -849,20 +887,26 @@ async def watch(websocket: WebSocket, session_id: str):
     """Follow a session's live streams: each one's words so far as a "words"
     update from 0, then the updates its client gets, as they happen. A session
     with no stream running when the watcher joins gets {"type": "idle"}."""
+    if _cross_site(websocket):
+        await websocket.close(1008)
+        return
     await websocket.accept()
+    # Snapshot and subscribe with no await in between, so every update queued
+    # for this watcher is newer than the snapshot it follows.
+    snapshot = [
+        json.dumps(
+            {"type": "words", "from": 0, "words": state.words}
+            | {"stream": stream_id, "channel": channel}
+        )
+        for stream_id, (channel, state) in LIVE.get(session_id, {}).items()
+    ]
+    # None running: it ended between the page's last look and this socket.
     queue = asyncio.Queue()
+    for text in snapshot or [json.dumps({"type": "idle"})]:
+        queue.put_nowait(text)
     WATCHERS.setdefault(session_id, set()).add(queue)
 
     async def forward():
-        streams = list(LIVE.get(session_id, {}).items())
-        for stream_id, (channel, state) in streams:
-            update = {"type": "words", "from": 0, "words": state.words}
-            await websocket.send_text(
-                json.dumps({**update, "stream": stream_id, "channel": channel})
-            )
-        if not streams:
-            # It ended between the page's last look and this socket opening.
-            await websocket.send_text(json.dumps({"type": "idle"}))
         while True:
             await websocket.send_text(await queue.get())
 
@@ -1107,8 +1151,9 @@ def mcp_get_vocab() -> list[str]:
 def add_vocab(phrases: list[str]) -> list[str]:
     """Add phrases to the boost list and return the whole list. Boost proper
     nouns the recognizer gets wrong; common words can hurt recognition."""
-    vocab = _clean_phrases((_read_json(VOCAB) or []) + phrases)
-    _write_json(VOCAB, vocab)
+    with _vocab_lock:
+        vocab = _clean_phrases((_read_json(VOCAB) or []) + phrases)
+        _write_json(VOCAB, vocab)
     return vocab
 
 
@@ -1116,14 +1161,14 @@ def add_vocab(phrases: list[str]) -> list[str]:
 def remove_vocab(phrases: list[str]) -> list[str]:
     """Remove phrases from the boost list and return the whole list."""
     drop = set(_clean_phrases(phrases))
-    vocab = [p for p in _read_json(VOCAB) or [] if p not in drop]
-    _write_json(VOCAB, vocab)
+    with _vocab_lock:
+        vocab = [p for p in _read_json(VOCAB) or [] if p not in drop]
+        _write_json(VOCAB, vocab)
     return vocab
 
 
-# Served at /mcp. Mounted last so every route above takes precedence. Host
-# checks are off like the rest of the API: scribe has no authentication, so it
-# belongs on a private network or behind an authenticating proxy.
+# Served at /mcp. Mounted last so every route above takes precedence. The SDK's
+# own Host check is off: SCRIBE_ALLOWED_HOSTS covers the whole app, /mcp too.
 _mcp_app = mcp.streamable_http_app(
     stateless_http=True,
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),

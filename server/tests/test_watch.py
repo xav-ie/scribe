@@ -73,3 +73,16 @@ def test_streams_without_a_session_id_are_not_live(client, server):
         stream.send_bytes(pcm())
         stream.receive_text()
         assert server.LIVE == {}
+
+
+def test_closed_comes_after_the_recording_is_complete(client, server):
+    with client.websocket_connect(f"/ws/watch/{SID}") as w:
+        assert json.loads(w.receive_text()) == {"type": "idle"}
+        with client.websocket_connect("/ws") as stream:
+            stream.send_text(hello(sessionId=SID, channel="tab", save=True))
+            stream.send_bytes(pcm())
+            stream.receive_text()
+            assert json.loads(w.receive_text())["type"] == "words"
+        assert json.loads(w.receive_text())["type"] == "closed"
+        meta = json.loads((server.RECORDINGS / SID / "tab.json").read_text())
+        assert [x["word"] for x in meta["words"]] == ["w1"]

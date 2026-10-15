@@ -6,6 +6,7 @@ import pytest
 from conftest import SID
 
 OTHER = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+JSON = {"content-type": "application/json"}
 
 
 def record(started=1_700_000_000_000, **extra):
@@ -71,12 +72,14 @@ def test_unreadable_record_is_skipped(client, server):
 
 @pytest.mark.parametrize("body", [b"not json", b"[1]", b'"x"'])
 def test_post_rejects_non_objects(client, body):
-    assert client.post(f"/api/sessions/{SID}", content=body).status_code == 400
+    r = client.post(f"/api/sessions/{SID}", content=body, headers=JSON)
+    assert r.status_code == 400
 
 
 def test_post_rejects_oversized_records(client, server, monkeypatch):
     monkeypatch.setattr(server, "MAX_SESSION_BYTES", 100)
-    r = client.post(f"/api/sessions/{SID}", content=b"{" + b" " * 200 + b"}")
+    body = b"{" + b" " * 200 + b"}"
+    r = client.post(f"/api/sessions/{SID}", content=body, headers=JSON)
     assert r.status_code == 413
     assert not (server.RECORDINGS / SID).exists()
 
@@ -128,3 +131,12 @@ def test_vocab_is_capped(server):
 def test_ui_is_served(client):
     r = client.get("/")
     assert r.status_code == 200 and "<title>scribe</title>" in r.text
+
+
+def test_session_posts_must_be_json(client):
+    r = client.post(
+        f"/api/sessions/{SID}",
+        content=json.dumps(record()),
+        headers={"content-type": "text/plain"},
+    )
+    assert r.status_code == 415
