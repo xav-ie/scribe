@@ -24,8 +24,8 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export async function getSettings(): Promise<Settings> {
-  const stored = await chrome.storage.sync.get(DEFAULT_SETTINGS);
-  return { ...DEFAULT_SETTINGS, ...stored } as Settings;
+  const stored = await chrome.storage.sync.get<Settings>(DEFAULT_SETTINGS);
+  return { ...DEFAULT_SETTINGS, ...stored };
 }
 
 export async function setSettings(patch: Partial<Settings>): Promise<void> {
