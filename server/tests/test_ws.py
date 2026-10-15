@@ -72,7 +72,7 @@ def test_end_with_nothing_pending_still_flushes(client):
     settle(lambda: state.closed)
 
 
-@pytest.mark.parametrize("rate", [0, -48000, "x", None, 10**9])
+@pytest.mark.parametrize("rate", [0, -48000, "x", None, 10**9, 1000003, 191999])
 def test_bad_sample_rate_closes_the_stream(client, rate):
     with client.websocket_connect("/ws") as ws:
         ws.send_text(json.dumps({"sampleRate": rate}))
@@ -163,3 +163,53 @@ def test_no_boost_without_phrases(client):
     with client.websocket_connect("/ws") as ws:
         ws.send_text(hello())
     assert FakeState.instances[0].boost is None
+
+
+@pytest.mark.parametrize("rate", [8000, 44100, 48000, 96000])
+def test_common_rates_are_accepted(client, rate):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"sampleRate": rate}))
+        ws.send_bytes(pcm(rate // 10))
+        assert json.loads(ws.receive_text())["type"] == "words"
+
+
+def test_the_first_sample_rate_holds(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"sampleRate": 48000}))
+        ws.send_text(json.dumps({"sampleRate": 1000003}))
+        ws.send_bytes(pcm(STEP * 3))
+        json.loads(ws.receive_text())
+    assert FakeState.instances[0].steps == [(STEP, False)]
+
+
+def test_end_is_honoured_once(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(hello())
+        ws.send_text(json.dumps({"type": "end"}))
+        ws.send_text(json.dumps({"type": "end"}))
+        ws.send_bytes(pcm(STEP * 2))
+        json.loads(ws.receive_text())
+        assert json.loads(ws.receive_text()) == {"type": "done"}
+        ws.send_text(hello())
+    state = FakeState.instances[0]
+    settle(lambda: state.closed)
+    assert state.steps == [(1, True)]
+
+
+def test_half_samples_close_the_stream(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(hello())
+        ws.send_bytes(b"\x00\x00\x00")
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+    assert closed.value.code == 1003
+
+
+def test_a_stream_too_far_ahead_is_cut_off(client, server, monkeypatch):
+    monkeypatch.setattr(server, "MAX_BACKLOG_S", 0.05)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(hello())
+        ws.send_bytes(pcm(STEP * 4))
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+    assert closed.value.code == 1008

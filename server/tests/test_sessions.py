@@ -115,6 +115,11 @@ def test_vocab_rejects_garbage(client):
     assert client.put("/api/vocab", json=[1]).json() == {"phrases": []}
 
 
+def test_vocab_rejects_oversized_bodies(client, server, monkeypatch):
+    monkeypatch.setattr(server, "MAX_VOCAB_BYTES", 10)
+    assert client.put("/api/vocab", json={"phrases": ["x" * 20]}).status_code == 413
+
+
 def test_vocab_is_capped(server):
     many = [f"p{i}" for i in range(server.MAX_PHRASES + 5)]
     assert len(server._clean_phrases(many)) == server.MAX_PHRASES

@@ -109,7 +109,8 @@ A client opens `/ws` and sends one JSON text message first:
 }
 ```
 
-Only `sampleRate` is required. `sessionId` (a UUID) groups the streams of one
+Only `sampleRate` is required, and it must be a common rate (8, 11.025, 12,
+16, 22.05, 24, 32, 44.1, 48, 88.2 or 96 kHz). `sessionId` (a UUID) groups the streams of one
 meeting for the web UI; `channel` is `tab` or `mic`; `save` keeps the audio and
 words under `recordings/<sessionId>/`; `boost` adds phrases (participant names)
 to the vocabulary for this stream. Then it sends raw mono int16 little endian

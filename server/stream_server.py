@@ -50,7 +50,6 @@ and editing the vocabulary.
 import asyncio
 import ctypes
 import gc
-import io
 import json
 import logging
 import math
@@ -104,8 +103,15 @@ if not torch.cuda.is_available():
 print(f"[scribe] CUDA ready: {torch.cuda.get_device_name(0)}", flush=True)
 
 SAMPLE_RATE = 16000
-# Rates a client may declare; anything else is refused (0 would never fill a step).
-MIN_RATE, MAX_RATE = 8000, 192000
+# Source rates scribe resamples from; anything else is refused. An arbitrary
+# rate (a large prime) would build a resampling filter of millions of taps.
+RATES = {8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 88200, 96000}
+# Audio a stream may queue ahead of transcription (a client sending faster than
+# real time), in seconds at its own rate, before it is cut off.
+MAX_BACKLOG_S = 600
+# Uploads to /v1/audio/transcriptions.
+MAX_UPLOAD_BYTES = 100 * 2**20
+MAX_CLIP_S = 30 * 60
 MODEL_ID = os.environ.get("SCRIBE_MODEL", "nvidia/parakeet-unified-en-0.6b")
 LEFT_S = float(os.environ.get("SCRIBE_LEFT_S", "5.6"))
 CHUNK_S = float(os.environ.get("SCRIBE_CHUNK_S", "0.56"))
@@ -307,18 +313,40 @@ async def health():
     }
 
 
-def _transcribe_clip(audio_16k, phrases):
-    """A whole clip through the same chunked decoding as /ws. Blocking — via to_thread."""
+async def _on_gpu(fn, *args):
+    async with _gpu_lock:
+        return await asyncio.to_thread(fn, *args)
+
+
+async def _transcribe_clip(audio_16k, phrases):
+    """A whole clip through the same chunked decoding as /ws, taking the GPU a
+    step at a time so live streams keep up meanwhile."""
     state = StreamState()
     try:
-        state.set_boost(phrases)
+        await _on_gpu(state.set_boost, phrases)
         while audio_16k.shape[0] > (size := state.step_size()):
-            state.step(audio_16k[:size])
+            await _on_gpu(state.step, audio_16k[:size])
             audio_16k = audio_16k[size:]
-        state.step(audio_16k, last=True)
+        await _on_gpu(state.step, audio_16k, True)
     finally:
-        state.close()
+        await asyncio.shield(_on_gpu(state.close))
     return " ".join(w["word"] for w in state.words)
+
+
+def _read_clip(f):
+    """Mono float32 audio and its rate, or an HTTPException. Blocking."""
+    try:
+        with sf.SoundFile(f) as clip:
+            if clip.samplerate not in RATES:
+                raise HTTPException(400, f"unsupported sample rate {clip.samplerate}")
+            if clip.frames > MAX_CLIP_S * clip.samplerate:
+                raise HTTPException(413, f"clips are limited to {MAX_CLIP_S} s")
+            audio = clip.read(dtype="float32")
+    except RuntimeError as e:
+        raise HTTPException(400, f"unreadable audio: {e}") from None
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    return _to_16k(audio, clip.samplerate)
 
 
 @app.post("/v1/audio/transcriptions")
@@ -326,19 +354,12 @@ async def transcriptions(file: UploadFile):
     """OpenAI-style batch transcription (desktop dictation), boosted with the
     vocabulary. Only `file` is read; model/prompt/response_format are ignored
     and the reply is always {"text"}."""
-    try:
-        audio, rate = sf.read(io.BytesIO(await file.read()), dtype="float32")
-    except RuntimeError as e:
-        raise HTTPException(400, f"unreadable audio: {e}") from None
-    if audio.ndim > 1:
-        audio = audio.mean(axis=1)
+    if file.size is not None and file.size > MAX_UPLOAD_BYTES:
+        raise HTTPException(413)
+    audio = await asyncio.to_thread(_read_clip, file.file)
     if audio.size == 0:
         return {"text": ""}
-    audio = _to_16k(audio, rate)
-    phrases = _boost_phrases(None)
-    async with _gpu_lock:
-        text = await asyncio.to_thread(_transcribe_clip, audio, phrases)
-    return {"text": text}
+    return {"text": await _transcribe_clip(audio, _boost_phrases(None))}
 
 
 class Recording:
@@ -425,7 +446,7 @@ def _sample_rate(value):
         rate = int(value)
     except (TypeError, ValueError):
         return None
-    return rate if MIN_RATE <= rate <= MAX_RATE else None
+    return rate if rate in RATES else None
 
 
 def _open_recording(config, src_rate):
@@ -461,6 +482,7 @@ def _publish(session_id, msg):
 UI_HTML = (Path(__file__).parent / "ui.html").read_text()
 STEM_RE = re.compile(r"^(tab|mic)(-[0-9]+)?$")
 MAX_SESSION_BYTES = 50 * 2**20
+MAX_VOCAB_BYTES = 2 * 2**20
 
 
 def _clean_phrases(items):
@@ -604,20 +626,28 @@ def get_session(session_id: str):
     }
 
 
+async def _json_body(request, limit):
+    """The request's JSON, refused (413) as soon as it passes `limit` bytes
+    rather than after buffering all of it."""
+    if int(request.headers.get("content-length") or 0) > limit:
+        raise HTTPException(413)
+    body = bytearray()
+    async for part in request.stream():
+        body += part
+        if len(body) > limit:
+            raise HTTPException(413)
+    try:
+        return json.loads(body)
+    except ValueError:
+        raise HTTPException(400) from None
+
+
 @app.post("/api/sessions/{session_id}")
 async def put_session(session_id: str, request: Request):
     """The extension's record of a finished recording: transcript, speaker
     timeline, per-stream words and clocks, adapter snapshots."""
     folder = _session_dir(session_id)
-    body = bytearray()
-    async for part in request.stream():
-        body += part
-        if len(body) > MAX_SESSION_BYTES:
-            raise HTTPException(413)
-    try:
-        record = json.loads(body)
-    except ValueError:
-        raise HTTPException(400) from None
+    record = await _json_body(request, MAX_SESSION_BYTES)
     if not isinstance(record, dict):
         raise HTTPException(400)
 
@@ -636,10 +666,7 @@ def read_vocab():
 
 @app.put("/api/vocab")
 async def put_vocab(request: Request):
-    try:
-        body = json.loads(await request.body())
-    except ValueError:
-        raise HTTPException(400) from None
+    body = await _json_body(request, MAX_VOCAB_BYTES)
     phrases = _clean_phrases(body.get("phrases") if isinstance(body, dict) else None)
     await asyncio.to_thread(_write_json, VOCAB, phrases)
     return {"phrases": phrases}
@@ -664,6 +691,7 @@ async def ws(websocket: WebSocket):
     # source rate, resampled to 16 kHz here, and whether to keep the audio.
     # Binary messages are raw int16-LE mono PCM.
     src_rate = SAMPLE_RATE
+    configured = False
 
     sent = 0  # words the client has; the last of them may still grow
     connected = True
@@ -690,12 +718,22 @@ async def ws(websocket: WebSocket):
     # traffic (keepalive pongs) is never stuck behind audio still waiting to be
     # transcribed, and work through the backlog from this queue. Audio received
     # before a disconnect is still transcribed (and saved).
+    # The backlog is bounded, though: a stream that gets MAX_BACKLOG_S of audio
+    # ahead of transcription is cut off rather than allowed to fill memory.
     inbox = asyncio.Queue()
+    backlog = 0  # bytes of audio queued in the inbox
+    overflow = False
+    ended = False  # {"type": "end"} came: nothing after it is decoded
 
     async def read():
+        nonlocal backlog, overflow
         try:
             while True:
                 msg = await websocket.receive()
+                backlog += len(msg.get("bytes") or b"")
+                if backlog > MAX_BACKLOG_S * src_rate * 2:
+                    overflow = True
+                    return
                 await inbox.put(msg)
                 if msg.get("type") == "websocket.disconnect":
                     return
@@ -708,8 +746,16 @@ async def ws(websocket: WebSocket):
     try:
         while True:
             msg = await inbox.get()
+            backlog -= len(msg.get("bytes") or b"")
+            if overflow:
+                await websocket.close(
+                    1008, "audio arriving faster than it can be transcribed"
+                )
+                break
             if msg.get("type") == "websocket.disconnect":
                 break
+            if ended:
+                continue
             if msg.get("text"):
                 config = _parse_config(msg["text"])
                 if config is None:
@@ -718,6 +764,7 @@ async def ws(websocket: WebSocket):
                 # The client is done talking: decode the audio still short of a
                 # step (and the right context held back), then say so.
                 if config.get("type") == "end":
+                    ended = True
                     tail = _to_16k(state.pending, src_rate)
                     state.pending = np.empty(0, dtype=np.float32)
                     if recording is not None:
@@ -729,10 +776,13 @@ async def ws(websocket: WebSocket):
                     await send()
                     await websocket.send_text(json.dumps({"type": "done"}))
                     continue
-                if "sampleRate" in config:
+                # The first rate holds for the whole stream: audio already
+                # buffered (and saved) is at that rate.
+                if "sampleRate" in config and not configured:
+                    configured = True
                     src_rate = _sample_rate(config["sampleRate"])
                     if src_rate is None:
-                        await websocket.close(1003, "sampleRate out of range")
+                        await websocket.close(1003, "unsupported sampleRate")
                         break
                     if recording is None:
                         recording = _open_recording(config, src_rate)
@@ -753,6 +803,9 @@ async def ws(websocket: WebSocket):
             raw = msg.get("bytes")
             if not raw:
                 continue
+            if len(raw) % 2:
+                await websocket.close(1003, "PCM frames must be whole int16 samples")
+                break
             chunk = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
             state.pending = np.concatenate([state.pending, chunk])
             # Resample one whole step at a time (not each small message), so
