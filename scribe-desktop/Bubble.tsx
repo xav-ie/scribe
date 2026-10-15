@@ -18,13 +18,15 @@ const FRAME_HEIGHT = 160;
 
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
 
-// Top of each laid-out line in pixels, plus the bottom of the last one.
+// Top of each laid-out line in pixels, plus the bottom of the last one. The
+// extents are out parameters the bindings type as nullable; Pango always fills
+// them.
 function lineTops(layout: Pango.Layout): number[] {
   const tops: number[] = [];
   const iter = layout.get_iter();
-  do tops.push(iter.get_line_extents()[1].y / Pango.SCALE);
+  do tops.push(iter.get_line_extents()[1]!.y / Pango.SCALE);
   while (iter.next_line());
-  tops.push(layout.get_extents()[1].height / Pango.SCALE);
+  tops.push(layout.get_extents()[1]!.height / Pango.SCALE);
   return tops;
 }
 

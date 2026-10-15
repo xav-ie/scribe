@@ -34,24 +34,18 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm ${{ matrix.task }}
 
-  scribe-desktop-format:
+  # tsc, eslint and prettier for scribe-desktop. Its GObject types are
+  # generated from the GIR files the desktop dev shell provides.
+  scribe-desktop:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: extension
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: extension/package.json
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: pnpm
-          cache-dependency-path: extension/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec prettier --check ../scribe-desktop
+      - uses: cachix/install-nix-action@v31
+      - name: Check scribe-desktop
+        run: nix develop .#desktop --command bash -c 'cd scribe-desktop && pnpm install --frozen-lockfile && pnpm check'
+      - name: Check the web UI's formatting
+        run: nix develop .#desktop --command bash -c 'cd scribe-desktop && pnpm exec prettier --check ../server/ui.html'
 
   nix:
     runs-on: ubuntu-latest

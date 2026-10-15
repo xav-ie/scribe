@@ -91,7 +91,30 @@
       );
 
       devShells = forAll (
-        pkgs: _: {
+        pkgs: system: {
+          # scribe-desktop's type check: GIR files for scripts/types.sh and the
+          # AGS JS library tsc resolves `ags` from.
+          desktop = pkgs.mkShell {
+            packages = [
+              pkgs.nodejs_24
+              pkgs.pnpm
+            ];
+            GIR_PATH = pkgs.lib.makeSearchPath "share/gir-1.0" (
+              map pkgs.lib.getDev [
+                pkgs.gdk-pixbuf
+                pkgs.glib
+                pkgs.gobject-introspection
+                pkgs.graphene
+                pkgs.gtk4
+                pkgs.harfbuzz
+                pkgs.libsoup_3
+                pkgs.pango
+                ags.packages.${system}.astal4
+                ags.packages.${system}.io
+              ]
+            );
+            AGS_JS = ags.packages.${system}.default.jsPackage;
+          };
           default = pkgs.mkShell {
             packages = [
               (serverTestPython pkgs)

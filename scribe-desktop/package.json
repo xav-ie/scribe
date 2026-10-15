@@ -1,0 +1,22 @@
+{
+  "name": "scribe-desktop",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@10.26.1",
+  "scripts": {
+    "types": "scripts/types.sh",
+    "check": "pnpm types && pnpm check:types && pnpm check:lint && pnpm check:format",
+    "check:types": "scripts/check-types.sh",
+    "check:lint": "eslint .",
+    "check:format": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@ts-for-gir/cli": "5.5.0",
+    "eslint": "^10.3.0",
+    "prettier": "~3.8.3",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.59.2"
+  }
+}
