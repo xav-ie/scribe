@@ -1,4 +1,4 @@
-<!-- logo goes here -->
+<picture><source media="(prefers-color-scheme: light)" srcset="assets/logo/scribe-light.svg"><img align="right" src="assets/logo/scribe.svg" width="120" alt="scribe logo: a snail whose shell is a spiraling sound wave"></picture>
 
 # scribe
 
