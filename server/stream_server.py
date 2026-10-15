@@ -37,7 +37,8 @@ A stream's first text message is {"sampleRate", "sessionId", "channel", "save",
 words and {"type": "done"}; the stream should send no audio after it.
 
 /ws/watch/<sessionId> follows a session's streams while they run: the words so
-far, then every update their clients get (see LIVE).
+far, then every update their clients get (see LIVE), or {"type": "idle"} when
+none is running.
 
 GET / serves ui.html, a browser for those sessions over the /api routes, and
 /mcp is an MCP server (streamable HTTP) for listing, reading and searching
@@ -103,6 +104,8 @@ if not torch.cuda.is_available():
 print(f"[scribe] CUDA ready: {torch.cuda.get_device_name(0)}", flush=True)
 
 SAMPLE_RATE = 16000
+# Rates a client may declare; anything else is refused (0 would never fill a step).
+MIN_RATE, MAX_RATE = 8000, 192000
 MODEL_ID = os.environ.get("SCRIBE_MODEL", "nvidia/parakeet-unified-en-0.6b")
 LEFT_S = float(os.environ.get("SCRIBE_LEFT_S", "5.6"))
 CHUNK_S = float(os.environ.get("SCRIBE_CHUNK_S", "0.56"))
@@ -408,6 +411,23 @@ def _to_16k(audio, src_rate):
     return resample_poly(audio, SAMPLE_RATE // g, src_rate // g).astype(np.float32)
 
 
+def _parse_config(text):
+    try:
+        config = json.loads(text)
+    except ValueError:
+        return None
+    return config if isinstance(config, dict) else None
+
+
+def _sample_rate(value):
+    """A client's declared rate, or None when it isn't one we can resample from."""
+    try:
+        rate = int(value)
+    except (TypeError, ValueError):
+        return None
+    return rate if MIN_RATE <= rate <= MAX_RATE else None
+
+
 def _open_recording(config, src_rate):
     session_id, channel = config.get("sessionId"), config.get("channel")
     if (
@@ -493,7 +513,30 @@ def _channels(folder, with_words):
 
 
 def _read_session(folder):
-    return _read_json(folder / "session.json")
+    """The extension's record, with the fields scribe reads coerced to their
+    expected shapes: anyone on the network can post one, and a malformed record
+    must not break the listing or the MCP tools."""
+    session = _read_json(folder / "session.json")
+    if not isinstance(session, dict):
+        return None
+
+    def number(value):
+        ok = isinstance(value, int | float) and not isinstance(value, bool)
+        return value if ok and math.isfinite(value) else None
+
+    for key in ("startedAt", "stoppedAt"):
+        session[key] = number(session.get(key))
+    if not isinstance(session.get("platform"), str):
+        session["platform"] = None
+    session["segments"] = [
+        seg
+        for seg in session.get("segments") or []
+        if isinstance(seg, dict)
+        and isinstance(seg.get("speaker"), str)
+        and isinstance(seg.get("text"), str)
+        and number(seg.get("start")) is not None
+    ]
+    return session
 
 
 # The browser routes are plain `def`, so FastAPI runs their file work in its
@@ -566,9 +609,11 @@ async def put_session(session_id: str, request: Request):
     """The extension's record of a finished recording: transcript, speaker
     timeline, per-stream words and clocks, adapter snapshots."""
     folder = _session_dir(session_id)
-    body = await request.body()
-    if len(body) > MAX_SESSION_BYTES:
-        raise HTTPException(413)
+    body = bytearray()
+    async for part in request.stream():
+        body += part
+        if len(body) > MAX_SESSION_BYTES:
+            raise HTTPException(413)
     try:
         record = json.loads(body)
     except ValueError:
@@ -666,7 +711,10 @@ async def ws(websocket: WebSocket):
             if msg.get("type") == "websocket.disconnect":
                 break
             if msg.get("text"):
-                config = json.loads(msg["text"])
+                config = _parse_config(msg["text"])
+                if config is None:
+                    await websocket.close(1003, "expected a JSON object")
+                    break
                 # The client is done talking: decode the audio still short of a
                 # step (and the right context held back), then say so.
                 if config.get("type") == "end":
@@ -682,7 +730,10 @@ async def ws(websocket: WebSocket):
                     await websocket.send_text(json.dumps({"type": "done"}))
                     continue
                 if "sampleRate" in config:
-                    src_rate = int(config["sampleRate"])
+                    src_rate = _sample_rate(config["sampleRate"])
+                    if src_rate is None:
+                        await websocket.close(1003, "sampleRate out of range")
+                        break
                     if recording is None:
                         recording = _open_recording(config, src_rate)
                     session_id = str(config.get("sessionId"))
@@ -726,27 +777,39 @@ async def ws(websocket: WebSocket):
             if not streams:
                 LIVE.pop(live[0], None)
             _publish(live[0], {"type": "closed", "stream": stream_id})
-        async with _gpu_lock:
-            await asyncio.to_thread(state.close)
-        if recording is not None:
-            # Keep the tail shorter than one step too, so the file is complete.
-            recording.close(state.words, _to_16k(state.pending, src_rate))
+
+        async def cleanup():
+            if recording is not None:
+                # Keep the tail shorter than one step too, so the file is complete.
+                tail = _to_16k(state.pending, src_rate)
+                await asyncio.to_thread(recording.close, state.words, tail)
+            async with _gpu_lock:
+                await asyncio.to_thread(state.close)
+
+        # Shielded: a cancelled handler (server shutdown) must still free the
+        # stream's boost model and save its words.
+        await asyncio.shield(cleanup())
 
 
 @app.websocket("/ws/watch/{session_id}")
 async def watch(websocket: WebSocket, session_id: str):
     """Follow a session's live streams: each one's words so far as a "words"
-    update from 0, then the updates its client gets, as they happen."""
+    update from 0, then the updates its client gets, as they happen. A session
+    with no stream running when the watcher joins gets {"type": "idle"}."""
     await websocket.accept()
     queue = asyncio.Queue()
     WATCHERS.setdefault(session_id, set()).add(queue)
 
     async def forward():
-        for stream_id, (channel, state) in list(LIVE.get(session_id, {}).items()):
+        streams = list(LIVE.get(session_id, {}).items())
+        for stream_id, (channel, state) in streams:
             update = {"type": "words", "from": 0, "words": state.words}
             await websocket.send_text(
                 json.dumps({**update, "stream": stream_id, "channel": channel})
             )
+        if not streams:
+            # It ended between the page's last look and this socket opening.
+            await websocket.send_text(json.dumps({"type": "idle"}))
         while True:
             await websocket.send_text(await queue.get())
 
@@ -775,6 +838,12 @@ mcp = MCPServer(
 )
 
 
+def _meeting_dir(session_id):
+    if not SESSION_ID_RE.fullmatch(session_id):
+        raise ToolError(f"no session {session_id}")
+    return RECORDINGS / session_id
+
+
 def _iso(ms):
     return datetime.fromtimestamp(ms / 1000, UTC).isoformat() if ms else None
 
@@ -801,9 +870,12 @@ def _participants(session):
     extension's snapshots) plus everyone who spoke, sorted. A tile's
     "(Presentation)" style suffix is dropped."""
     names = {s["speaker"] for s in session.get("segments") or []}
-    for snapshot in session.get("diagnostics") or []:
-        for name in snapshot.get("names") or []:
-            names.add(re.sub(r"\s*\([^)]*\)$", "", name).strip())
+    snapshots = session.get("diagnostics")
+    for snapshot in snapshots if isinstance(snapshots, list) else []:
+        tiles = snapshot.get("names") if isinstance(snapshot, dict) else None
+        for name in tiles if isinstance(tiles, list) else []:
+            if isinstance(name, str):
+                names.add(re.sub(r"\s*\([^)]*\)$", "", name).strip())
     return sorted(
         n for n in names if n and n != "Unknown" and not NOT_A_PERSON_RE.search(n)
     )
@@ -847,7 +919,7 @@ def list_meetings(
 def get_transcript(session_id: str) -> str:
     """A meeting's transcript as "[m:ss] Speaker: text" lines, m:ss from the
     start of the recording."""
-    session = _read_session(_session_dir(session_id))
+    session = _read_session(_meeting_dir(session_id))
     if not session:
         raise ToolError(f"no transcript for session {session_id}")
     head = f"Meeting {session_id}, started {_iso(session.get('startedAt'))}, on {session.get('platform')}\nParticipants: {', '.join(_participants(session))}"
@@ -892,7 +964,7 @@ def search_transcripts(
 
 def _cleanups(session_id):
     """A meeting's cleanup records, oldest first."""
-    folder = _session_dir(session_id) / "cleanups"
+    folder = _meeting_dir(session_id) / "cleanups"
     records = [_read_json(p) for p in folder.glob("*.json")] if folder.is_dir() else []
     return sorted(filter(None, records), key=lambda c: c["startedAt"])
 
@@ -913,7 +985,7 @@ def create_cleanup(session_id: str, model: str, job_id: str | None = None) -> di
     keeps the record: the caller runs the model (job_id is its job, so another
     client can follow it) and reports back with finish_cleanup. A meeting can
     have any number of cleanups; its transcript itself never changes."""
-    folder = _session_dir(session_id)
+    folder = _meeting_dir(session_id)
     if not (folder / "session.json").exists():
         raise ToolError(f"no transcript for session {session_id}")
     record = {
@@ -942,7 +1014,7 @@ def finish_cleanup(
         raise ToolError("pass exactly one of notes or error")
     if notes is not None and len(json.dumps(notes)) > MAX_SESSION_BYTES:
         raise ToolError("notes are too large")
-    path = _session_dir(session_id) / "cleanups" / f"{cleanup_id}.json"
+    path = _meeting_dir(session_id) / "cleanups" / f"{cleanup_id}.json"
     record = _read_json(path) if re.fullmatch(r"[0-9a-f]{12}", cleanup_id) else None
     if record is None:
         raise ToolError(f"no cleanup {cleanup_id} for session {session_id}")
