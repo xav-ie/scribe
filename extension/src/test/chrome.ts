@@ -8,7 +8,10 @@ const sync = new Map<string, unknown>();
 
 export const chromeStub = {
   sync,
-  permissions: { request: vi.fn(async () => true) },
+  permissions: {
+    request: vi.fn(async () => true),
+    contains: vi.fn(async () => false),
+  },
 };
 
 const fake = {
@@ -36,4 +39,6 @@ beforeEach(() => {
   sync.clear();
   chromeStub.permissions.request.mockReset();
   chromeStub.permissions.request.mockResolvedValue(true);
+  chromeStub.permissions.contains.mockReset();
+  chromeStub.permissions.contains.mockResolvedValue(false);
 });

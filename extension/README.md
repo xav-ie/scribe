@@ -128,7 +128,7 @@ pnpm check       # runs types + lint + format + knip + unit tests in parallel
 pnpm test        # vitest in watch mode
 pnpm lint        # eslint --fix
 pnpm format      # prettier --write
-pnpm icons       # regenerate icons (needs ImageMagick `magick` on PATH)
+pnpm icons       # regenerate icons from the logo's shell (needs ImageMagick `magick` with librsvg)
 ```
 
 Stack: pnpm, flat ESLint (typescript-eslint, unicorn, sonarjs, import-x,
@@ -175,8 +175,9 @@ Set the streaming ASR **WebSocket URL** on the extension's options page
 persisted via `chrome.storage`. There is no default: the options page opens on
 install, and recording asks for a server until one is set.
 
-Saving a URL on another host asks Chrome for access to it (from
-`optional_host_permissions`); a local `ws://localhost:8000` is granted at
+If the extension can't reach that host yet, the page explains why it needs
+access and asks Chrome for it only when you click **Allow access** (from
+`optional_host_permissions`). A local `ws://localhost:8000` is granted at
 install.
 
 ## Service contract

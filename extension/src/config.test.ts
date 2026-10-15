@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_SETTINGS,
   getSettings,
+  grantServerAccess,
   saveServerUrl,
   serverOrigins,
 } from './config';
@@ -28,29 +29,52 @@ describe('serverOrigins', () => {
 });
 
 describe('saveServerUrl', () => {
-  it('asks for the host, then saves', async () => {
-    expect(await saveServerUrl('wss://asr.example.org:9000/ws')).toBeNull();
-    expect(chromeStub.permissions.request).toHaveBeenCalledWith({
-      origins: ['wss://asr.example.org/*', 'https://asr.example.org/*'],
+  it('saves straight away when the host is already allowed', async () => {
+    chromeStub.permissions.contains.mockResolvedValue(true);
+    expect(await saveServerUrl('wss://asr.example.org:9000/ws')).toEqual({
+      status: 'saved',
     });
+    expect(chromeStub.permissions.request).not.toHaveBeenCalled();
     const { wsUrl } = await getSettings();
     expect(wsUrl).toBe('wss://asr.example.org:9000/ws');
   });
 
-  it('keeps the old server when access is refused', async () => {
-    chromeStub.permissions.request.mockResolvedValue(false);
-    expect(await saveServerUrl('wss://asr.example.org/ws')).toBe(
-      'Access to asr.example.org was not granted.',
-    );
+  it('asks the page to get access first, without prompting itself', async () => {
+    expect(await saveServerUrl('wss://asr.example.org:9000/ws')).toEqual({
+      status: 'needs-access',
+      host: 'asr.example.org',
+      origins: ['wss://asr.example.org/*', 'https://asr.example.org/*'],
+    });
+    expect(chromeStub.permissions.request).not.toHaveBeenCalled();
     const { wsUrl } = await getSettings();
     expect(wsUrl).toBe(DEFAULT_SETTINGS.wsUrl);
   });
 
-  it('does not ask for anything on a bad URL', async () => {
-    expect(await saveServerUrl('http://asr.example.org/ws')).toMatch(
-      /ws:\/\/ or wss:\/\//,
+  it('rejects a bad URL without checking access', async () => {
+    const result = await saveServerUrl('http://asr.example.org/ws');
+    expect(result).toMatchObject({ status: 'invalid' });
+    expect(chromeStub.permissions.contains).not.toHaveBeenCalled();
+  });
+});
+
+describe('grantServerAccess', () => {
+  const url = 'wss://asr.example.org/ws';
+  const origins = serverOrigins(url);
+
+  it('saves once Chrome grants access', async () => {
+    expect(await grantServerAccess(url, origins)).toBeNull();
+    expect(chromeStub.permissions.request).toHaveBeenCalledWith({ origins });
+    const { wsUrl } = await getSettings();
+    expect(wsUrl).toBe(url);
+  });
+
+  it('keeps the old server when access is refused', async () => {
+    chromeStub.permissions.request.mockResolvedValue(false);
+    expect(await grantServerAccess(url, origins)).toBe(
+      'Access to asr.example.org was not granted.',
     );
-    expect(chromeStub.permissions.request).not.toHaveBeenCalled();
+    const { wsUrl } = await getSettings();
+    expect(wsUrl).toBe(DEFAULT_SETTINGS.wsUrl);
   });
 });
 

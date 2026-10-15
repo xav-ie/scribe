@@ -231,3 +231,51 @@ body.options-page {
   max-width: 480px;
   margin: 24px auto;
 }
+.brand {
+  justify-content: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.brand img {
+  width: 80px;
+  height: 80px;
+}
+.brand h1 {
+  font-size: 20px;
+}
+.brand p {
+  margin: 2px 0 0;
+}
+.muted {
+  color: var(--muted);
+}
+.access {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: rgba(79, 140, 255, 0.08);
+}
+.access.hidden {
+  display: none;
+}
+.access h2 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--fg);
+}
+.access p {
+  margin: 0 0 10px;
+  line-height: 1.45;
+}
+.access .actions {
+  display: flex;
+  gap: 8px;
+}
+.access .actions button {
+  width: auto;
+  padding: 8px 16px;
+  font-size: 13px;
+}

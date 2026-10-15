@@ -7,13 +7,20 @@
     <link rel="stylesheet" href="./popup.css" />
   </head>
   <body class="options-page">
-    <header>
-      <h1>Settings</h1>
+    <header class="brand">
+      <img
+        id="logo"
+        alt="scribe logo: a snail whose shell is a spiraling sound wave"
+      />
+      <div>
+        <h1>Meeting Capture</h1>
+        <p class="muted">Live meeting transcription with scribe</p>
+      </div>
     </header>
 
     <form id="form" class="options">
       <label class="field">
-        <span>Streaming service (WebSocket URL)</span>
+        <span>scribe server (WebSocket URL)</span>
         <input
           type="url"
           id="wsUrl"
@@ -24,6 +31,21 @@
       </label>
       <button type="submit" class="primary">Save</button>
     </form>
+
+    <section id="access" class="access hidden">
+      <h2>Allow access to <span id="accessHost"></span>?</h2>
+      <p>
+        To transcribe, the extension streams each meeting's audio to your scribe
+        server over a WebSocket, and when a recording stops it sends the server
+        the finished transcript. Chrome needs your permission once for the
+        extension to connect to this host. It connects only while recording or
+        sending a transcript, and to nothing else on the web.
+      </p>
+      <div class="actions">
+        <button type="button" id="grant" class="primary">Allow access</button>
+        <button type="button" id="cancel" class="secondary">Cancel</button>
+      </div>
+    </section>
 
     <div id="error" class="error hidden"></div>
     <div id="saved" class="warning hidden"></div>

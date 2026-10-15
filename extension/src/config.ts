@@ -43,19 +43,37 @@ export function serverOrigins(wsUrl: string): string[] {
   return [`${url.protocol}//${url.hostname}/*`, `${http}//${url.hostname}/*`];
 }
 
-/**
- * Point the extension at another server: ask for access to its host, then save
- * it. Resolves to why it wasn't saved, or null. Chrome only grants host access
- * during a user gesture, so call this straight from one (nothing is awaited
- * before the request).
- */
-export async function saveServerUrl(wsUrl: string): Promise<string | null> {
+export type SaveResult =
+  | { status: 'saved' }
+  | { status: 'invalid'; error: string }
+  /** Chrome hasn't granted access to the server's host yet: ask the user. */
+  | { status: 'needs-access'; host: string; origins: string[] };
+
+/** Save the server if the extension may already reach its host. */
+export async function saveServerUrl(wsUrl: string): Promise<SaveResult> {
   let origins: string[];
   try {
     origins = serverOrigins(wsUrl);
   } catch (error) {
-    return error instanceof Error ? error.message : String(error);
+    const message = error instanceof Error ? error.message : String(error);
+    return { status: 'invalid', error: message };
   }
+  if (!(await chrome.permissions.contains({ origins }))) {
+    return { status: 'needs-access', host: new URL(wsUrl).hostname, origins };
+  }
+  await setSettings({ wsUrl });
+  return { status: 'saved' };
+}
+
+/**
+ * Ask Chrome for access to the server's host, then save it. Resolves to why it
+ * wasn't saved, or null. Chrome only asks during a user gesture, so call this
+ * straight from the click that asks for it: the request comes before any await.
+ */
+export async function grantServerAccess(
+  wsUrl: string,
+  origins: string[],
+): Promise<string | null> {
   const granted = await chrome.permissions.request({ origins });
   if (!granted) return `Access to ${new URL(wsUrl).hostname} was not granted.`;
   await setSettings({ wsUrl });
