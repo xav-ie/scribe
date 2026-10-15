@@ -11,9 +11,12 @@ from starlette.websockets import WebSocketDisconnect
 
 @pytest.mark.parametrize("path", ["/ws", f"/ws/watch/{SID}"])
 def test_other_sites_cannot_open_sockets(client, path):
-    with pytest.raises(WebSocketDisconnect) as closed:
-        with client.websocket_connect(path, headers={"origin": "https://evil.example"}):
-            pass
+    evil = {"origin": "https://evil.example"}
+    with (
+        pytest.raises(WebSocketDisconnect) as closed,
+        client.websocket_connect(path, headers=evil),
+    ):
+        pass
     assert closed.value.code == 1008
 
 

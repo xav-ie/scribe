@@ -32,6 +32,16 @@ in
       default = "/var/lib/scribe";
       description = "Host dir bind-mounted as /cache: HF/NeMo model cache, plus saved recordings under recordings/.";
     };
+
+    allowedHosts = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [
+        "scribe.example.com"
+        "localhost"
+      ];
+      description = "Host names scribe answers to; requests for any other Host are refused, which stops DNS rebinding. Empty answers any Host. scribe has no authentication either way.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -65,6 +75,7 @@ in
       autoStart = true;
       image = "localhost/scribe:latest";
       environment = {
+        SCRIBE_ALLOWED_HOSTS = lib.concatStringsSep "," cfg.allowedHosts;
         HF_HOME = "/cache/huggingface";
         NEMO_CACHE_DIR = "/cache/nemo";
         NUMBA_CACHE_DIR = "/tmp";

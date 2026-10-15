@@ -39,6 +39,12 @@ flowchart LR
 > audio, read every saved transcript and recording, and edit the vocabulary.
 > Keep it on a private network (a VPN, a tailnet) or behind a reverse proxy
 > that authenticates.
+>
+> Two protections are built in. WebSocket connections from web pages on other
+> sites are refused (the Origin must match the Host, so a reverse proxy has to
+> pass the Host header through), and `SCRIBE_ALLOWED_HOSTS` (the NixOS option
+> `services.scribe.allowedHosts`) refuses requests for host names other than
+> yours, which stops DNS rebinding attacks from pages your browser visits.
 
 The extension and scribe-desktop default to the author's server,
 `wss://scribe.lalala.casa/ws`. Point them at yours: the extension's options
@@ -59,6 +65,8 @@ page, and `SCRIBE_URL` for scribe-desktop.
         {
           services.scribe.enable = true;
           # services.scribe.dataDir = "/var/lib/scribe"; # model cache, recordings, vocabulary
+          # Refuse requests for other host names (DNS rebinding); empty allows any.
+          services.scribe.allowedHosts = [ "scribe.example.com" "localhost" ];
           # The container listens on 8000; publishing it is up to you.
           virtualisation.oci-containers.containers.scribe.ports = [ "127.0.0.1:8000:8000" ];
         }
