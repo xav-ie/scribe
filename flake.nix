@@ -85,6 +85,7 @@
             packages = [
               (serverTestPython pkgs)
               pkgs.imagemagick
+              pkgs.knope
               pkgs.nixfmt
               pkgs.nodejs_24
               pkgs.pnpm

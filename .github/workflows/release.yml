@@ -1,42 +1,38 @@
 name: Release
 
-# Changeset-driven, mirroring the bento-analytics flow but targeting a GitHub
-# Release (with the built .zip) instead of an npm publish.
-#
-# Normal cycle:
-#   1. Feature PRs land on main carrying a `.changeset/*.md` (run `pnpm changeset`).
-#   2. changesets/action opens / force-updates a rolling "Version Packages" PR
-#      that bumps package.json + writes CHANGELOG.md and consumes the changesets.
-#   3. Merge that PR. The next push to main has no pending changesets, so we
-#      build, zip dist/, and cut a `vX.Y.Z` GitHub Release using the new
-#      CHANGELOG section as the notes.
-
+# Runs when the release PR from prepare-release.yml merges, publishing the version in
+# extension/package.json: the extension's zip (manifest at its root, as Chrome's "Load unpacked"
+# and the Web Store expect) on a v<version> GitHub release with CHANGELOG.md's notes.
+# To retry one that failed part-way, re-run its failed jobs from the run's page.
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches: [main]
+  workflow_dispatch:
 
+# One release at a time; never cancel one half-way through publishing.
 concurrency:
-  # Serialize release runs — the "Version Packages" PR state lives in the repo,
-  # so parallel runs would trip over each other.
   group: release
   cancel-in-progress: false
 
 permissions: {}
 
 jobs:
-  release:
+  extension:
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.merged && github.head_ref == 'release')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write # push tags / the Version Packages branch, create Releases
-      pull-requests: write # open / update the Version Packages PR
+      contents: read
+    outputs:
+      sha: ${{ steps.version.outputs.sha }}
     defaults:
       run:
         working-directory: extension
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: extension/package.json
@@ -46,64 +42,39 @@ jobs:
           cache: pnpm
           cache-dependency-path: extension/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-
-      # With pending changesets → open/update the Version Packages PR (no build).
-      # With none → this is a no-op and the next step does the release.
-      - name: Create Version Packages PR
-        id: changesets
-        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
-        with:
-          cwd: extension
-          version-script: pnpm run version
-          commit-message: "chore: version packages"
-          pr-title: "chore: version packages"
-
-      # No changesets left → the Version PR was just merged. Build the bumped
-      # version and publish a Release (idempotent: skips if the tag exists, and
-      # waits until the first changeset has produced a CHANGELOG).
-      - name: Build and publish GitHub Release
-        if: steps.changesets.outputs.has-changesets == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and zip
+        id: version
         run: |
           VERSION="$(node -p "require('./package.json').version")"
-          TAG="v${VERSION}"
-
-          if [ ! -f CHANGELOG.md ]; then
-            echo "No CHANGELOG.md yet — add a changeset (pnpm changeset) to start releasing."
-            exit 0
-          fi
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — nothing to do."
-            exit 0
-          fi
-
-          pnpm check
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           pnpm build
+          mkdir -p "$RUNNER_TEMP/artifacts"
+          ( cd dist && zip -r "$RUNNER_TEMP/artifacts/meeting-capture-extension-v$VERSION.zip" . )
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: extension
+          path: ${{ runner.temp }}/artifacts/*.zip
 
-          # Zip the contents of dist/ so manifest.json sits at the zip root —
-          # the layout the Chrome Web Store and "Load unpacked" expect.
-          ( cd dist && zip -r "../meeting-capture-extension-${VERSION}.zip" . )
-
-          # Latest CHANGELOG section (from the first `## ` heading to the next).
-          awk '/^## /{n++} n==1' CHANGELOG.md > release-notes.md
-
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --notes-file release-notes.md \
-            "meeting-capture-extension-${VERSION}.zip"
-
-  # --- Optional: publish to the Chrome Web Store --------------------------------
-  # Add a step to the job above (after the release is created) once the extension
-  # has a CWS listing and these repo secrets are set:
-  #   CWS_EXTENSION_ID, CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN
-  #
-  #   - uses: mnao305/chrome-extension-upload@v5
-  #     if: steps.changesets.outputs.has-changesets == 'false'
-  #     with:
-  #       file-path: meeting-capture-extension-*.zip
-  #       extension-id: ${{ secrets.CWS_EXTENSION_ID }}
-  #       client-id: ${{ secrets.CWS_CLIENT_ID }}
-  #       client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
-  #       refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
-  #       publish: true
+  # Tags v<version> and creates the GitHub release with CHANGELOG.md's notes and the zip.
+  release:
+    needs: [extension]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # tag and create the GitHub release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.extension.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: extension
+          path: artifacts
+      - uses: knope-dev/action@19617851f9f13ab2f27a05989c55efb18aca3675 # v2.1.2
+        with:
+          version: 0.23.0
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: knope release --verbose

@@ -1,0 +1,61 @@
+# Releases: each change adds a note with `knope document-change` (in nix develop); pushes to main
+# keep a release PR open (.github/workflows/prepare-release.yml), and merging it builds the
+# extension and publishes it as a GitHub release (.github/workflows/release.yml).
+
+[package]
+versioned_files = ["extension/package.json"]
+changelog = "CHANGELOG.md"
+assets = "artifacts/*"
+
+[changes]
+ignore_conventional_commits = true
+
+[[workflows]]
+name = "document-change"
+
+[[workflows.steps]]
+type = "CreateChangeFile"
+
+[[workflows]]
+name = "prepare-release"
+
+[[workflows.steps]]
+type = "Command"
+command = "git switch -c release"
+
+[[workflows.steps]]
+type = "PrepareRelease"
+
+# knope drops package.json's final newline, which prettier wants back.
+[[workflows.steps]]
+type = "Command"
+command = "sed -i -e '$a\\' extension/package.json && git add extension/package.json"
+shell = true
+
+[[workflows.steps]]
+type = "Command"
+command = "git commit -m \"chore: prepare release $version\""
+
+[[workflows.steps]]
+type = "Command"
+command = "git push --force --set-upstream origin release"
+
+[[workflows.steps]]
+type = "CreatePullRequest"
+base = "main"
+
+[workflows.steps.title]
+template = "chore: prepare release $version"
+
+[workflows.steps.body]
+template = "Merging this builds the extension and publishes $version as a GitHub release.\n\n$changelog"
+
+[[workflows]]
+name = "release"
+
+[[workflows.steps]]
+type = "Release"
+
+[github]
+owner = "xav-ie"
+repo = "scribe"

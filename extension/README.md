@@ -136,37 +136,14 @@ regexp, n), Prettier (single quotes), knip.
 
 ## CI / Releases
 
-Two GitHub Actions workflows (`.github/workflows/`):
-
-- **Checks** — on every push to `main` and every PR, runs `check:types`,
-  `check:lint`, `check:format`, `check:knip`, `check:test` and a `build` in
-  parallel.
-- **Release** — [Changesets](https://github.com/changesets/changesets)-driven.
-
-Releases are versioned with Changesets (no manual version bumps):
-
-1. As part of any change, record a changeset and commit it with your PR:
-   ```bash
-   pnpm changeset           # pick patch/minor/major + write a summary
-   ```
-2. When the PR merges to `main`, the Release workflow opens (or force-updates) a
-   rolling **"Version Packages"** PR that bumps `package.json`, writes
-   `CHANGELOG.md`, and deletes the consumed changeset files.
-3. **Merge the Version Packages PR.** The next push to `main` has no pending
-   changesets, so the workflow builds, zips `dist/` into
-   `meeting-capture-extension-<version>.zip` (manifest at the zip root), and cuts
-   a `vX.Y.Z` GitHub Release using that version's `CHANGELOG.md` section as the
-   notes.
-
-> One-time repo setting: **Settings → Actions → General → Workflow permissions →
-> "Allow GitHub Actions to create and approve pull requests"** must be enabled
-> for the action to open the Version Packages PR. Since `manifest.config.ts`
-> reads `package.json`, the released `manifest.json` version always matches the
-> tag automatically.
-
-Publishing to the Chrome Web Store is wired up but commented out in
-`release.yml` — enable it once a CWS listing exists and the `CWS_*` secrets are
-set.
+CI and releases live at the repository root (`.github/workflows/`): every push
+and PR runs the extension's types, lint, format, knip, unit tests, build and
+accessibility check. Releases use [knope](https://knope.tech): add a change
+note with `knope document-change` (in `nix develop`), pushes to `main` keep a
+release PR open with the next version and changelog, and merging it builds
+`dist/` into `meeting-capture-extension-v<version>.zip` (manifest at the zip
+root) on a `v<version>` GitHub release. `manifest.config.ts` reads
+`package.json`, so the manifest's version always matches the tag.
 
 ## Configure the service
 

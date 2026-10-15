@@ -161,6 +161,7 @@ nix flake check              # ruff, nixfmt, server tests, module eval
 pytest server/tests          # the server's tests on their own (no GPU: the ML stack is stubbed)
 cd extension && pnpm i && pnpm check && pnpm build
 pnpm screenshot               # regenerate the README images
+knope document-change         # note a change for the next release (from the repo root)
 ```
 
 The server tests cover the HTTP and WebSocket protocol, saving, watchers,
