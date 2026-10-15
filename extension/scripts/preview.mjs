@@ -5,11 +5,26 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { launch } from 'puppeteer-core';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(root, 'dist');
 
-export function findChrome() {
+// CI runners start Chrome slowly now and then: allow a minute, and one retry.
+export async function launchChrome() {
+  const options = {
+    executablePath: findChrome(),
+    args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+    timeout: 60_000,
+  };
+  try {
+    return await launch(options);
+  } catch {
+    return launch(options);
+  }
+}
+
+function findChrome() {
   if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
   const names = ['chromium', 'google-chrome', 'google-chrome-stable', 'chrome'];
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {

@@ -6,8 +6,7 @@
 // Chromium, found on PATH or through CHROME_PATH)
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { launch } from 'puppeteer-core';
-import { findChrome, servePreview } from './preview.mjs';
+import { launchChrome, servePreview } from './preview.mjs';
 
 const axe = readFileSync(
   createRequire(import.meta.url).resolve('axe-core/axe.min.js'),
@@ -52,10 +51,7 @@ const states = [
 let current = states[0];
 const preview = await servePreview(() => current);
 
-const browser = await launch({
-  executablePath: findChrome(),
-  args: ['--no-sandbox'],
-});
+const browser = await launchChrome();
 let failures = 0;
 try {
   for (const state of states) {

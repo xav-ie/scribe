@@ -8,7 +8,7 @@
     "src/speaker/index.ts",
     "manifest.config.ts"
   ],
-  "project": ["src/**/*.ts", "*.ts"],
+  "project": ["src/**/*.ts", "*.ts", "scripts/**/*.mjs"],
   "ignoreBinaries": ["magick"],
   "ignoreDependencies": ["axe-core"]
 }

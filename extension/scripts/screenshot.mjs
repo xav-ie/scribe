@@ -4,8 +4,7 @@
 // Chrome or Chromium, like pnpm a11y)
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { launch } from 'puppeteer-core';
-import { findChrome, servePreview } from './preview.mjs';
+import { launchChrome, servePreview } from './preview.mjs';
 
 const out = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -96,10 +95,7 @@ const hero = `<!doctype html>
 const preview = await servePreview(() => ({ rec: recording }), {
   '/hero.html': hero,
 });
-const browser = await launch({
-  executablePath: findChrome(),
-  args: ['--no-sandbox'],
-});
+const browser = await launchChrome();
 try {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 760, deviceScaleFactor: 2 });
