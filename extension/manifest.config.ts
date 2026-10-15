@@ -1,10 +1,19 @@
+import { execFileSync } from 'node:child_process';
 import { defineManifest } from '@crxjs/vite-plugin';
 import pkg from './package.json';
+
+// Every build says which commit it came from (+dirty for uncommitted changes),
+// so a session record or the popup shows exactly what code was running.
+// Build-time read of local git metadata, not user input.
+// eslint-disable-next-line sonarjs/no-os-command-from-path
+const git = (...args: string[]) => execFileSync('git', args).toString().trim();
+const BUILD = `${pkg.version} ${git('rev-parse', '--short', 'HEAD')}${git('status', '--porcelain', '--untracked-files=no') ? '+dirty' : ''} ${new Date().toISOString().slice(0, 16)}Z`;
 
 export default defineManifest({
   manifest_version: 3,
   name: 'Meeting Capture',
   version: pkg.version,
+  version_name: BUILD,
   description: pkg.description,
   icons: {
     16: 'public/icons/icon16.png',
@@ -20,13 +29,30 @@ export default defineManifest({
     service_worker: 'src/background.ts',
     type: 'module',
   },
-  permissions: ['tabCapture', 'offscreen', 'storage', 'activeTab', 'tabs'],
-  // WebSocket endpoints the offscreen doc may stream PCM to. A host must be
-  // listed here or the connection is blocked.
+  // scripting: inject the speaker scraper into a meeting tab opened before the
+  // extension was (re)loaded, which Chrome skips.
+  permissions: [
+    'tabCapture',
+    'offscreen',
+    'storage',
+    'activeTab',
+    'tabs',
+    'scripting',
+  ],
+  // Streaming service endpoints: the WebSocket the offscreen doc streams PCM to,
+  // and the HTTP API the worker posts session records to. A host must be listed
+  // here or the connection is blocked.
   host_permissions: [
     'wss://scribe.lalala.casa/*', // deployed streaming ASR service
+    'https://scribe.lalala.casa/*', // its session API: records posted at stop
     'ws://localhost:8000/*', // local dev service
     'ws://127.0.0.1:8000/*',
+    'http://localhost:8000/*',
+    'http://127.0.0.1:8000/*',
+    // Meeting clients, so the speaker scraper can be injected into a tab that
+    // missed it (the content_scripts entry below already covers these hosts).
+    'https://meet.google.com/*',
+    'https://*.zoom.us/*',
   ],
   // Active-speaker scraper, injected into supported meeting clients. It reports
   // speaker changes to the background worker, which joins them with the streamed
@@ -36,6 +62,9 @@ export default defineManifest({
       matches: ['https://meet.google.com/*', 'https://*.zoom.us/*'],
       js: ['src/speaker/index.ts'],
       run_at: 'document_idle',
+      // Zoom's web client renders the meeting inside an iframe
+      // (iframe#webclient) of its app shell, so the scraper must run there too.
+      all_frames: true,
     },
   ],
   // Declaring the standalone pages here makes CRXJS bundle them even though they

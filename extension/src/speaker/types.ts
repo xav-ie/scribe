@@ -4,6 +4,8 @@
 // because these selectors are the most brittle part of the system — meeting
 // clients ship obfuscated, shifting class names, so expect to re-tune them.
 
+import type { DomProbe } from './dom';
+
 export interface SpeakerDiagnostics {
   /** How many participant tiles the adapter found. */
   tiles: number;
@@ -11,6 +13,12 @@ export interface SpeakerDiagnostics {
   names: string[];
   /** Who it currently thinks is speaking, or null. */
   speaking: string | null;
+  /** Recent speaking activity per participant, where the adapter measures it. */
+  rates?: Record<string, number>;
+  /** The local user's detected mute state (null: can't tell). */
+  muted?: boolean | null;
+  /** Page map attached while the adapter finds no tiles (see domProbe). */
+  probe?: DomProbe;
 }
 
 export interface SpeakerAdapter {
@@ -24,6 +32,12 @@ export interface SpeakerAdapter {
    * stop function.
    */
   start(onSpeaker: (name: string) => void): () => void;
+  /**
+   * The local user's own mic mute state from the meeting toolbar, or null if it
+   * can't be determined (in which case the mic isn't gated). Used to avoid
+   * recording your own muted self-talk.
+   */
+  isMuted?(): boolean | null;
   /** Snapshot for debug logging while tuning selectors. */
   diagnose(): SpeakerDiagnostics;
 }

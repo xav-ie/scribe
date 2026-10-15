@@ -2,21 +2,20 @@
 // DOM APIs (getUserMedia, AudioContext) the service worker lacks.
 //
 // IMPORTANT: offscreen documents can use chrome.runtime messaging ONLY — not
-// chrome.storage. So status/transcript updates go to the background worker,
-// which owns storage and does the speaker join.
+// chrome.storage. So status/transcript updates go to the background worker.
 //
-// Audio graph (no MediaRecorder — we stream raw PCM):
+// Audio graph — the tab and mic are SEPARATE ASR streams (never mixed), so the
+// mic can be attributed to the local user while the tab is attributed via the
+// active-speaker timeline:
 //
-//   tabStream ─▶ tabSource ─┬─▶ ctx.destination   (speakers: keep hearing it)
-//                           └─▶ mix ─▶ pcmTap ─▶ ctx.destination (silent sink)
-//   micStream ─▶ micSource ───▶ mix              (mixed in, not to speakers)
+//   tabStream ─▶ tabSource ─┬─▶ ctx.destination        (speakers: keep hearing it)
+//                           └─▶ pcmTap("tab") ─▶ WS ─▶ scribe  (remote audio)
+//   micStream ─▶ micSource ───▶ pcmTap("mic") ─▶ WS ─▶ scribe  (your voice)
 //
-//   pcmTap (AudioWorklet) posts Float32 blocks → int16 PCM → WebSocket → scribe
-//
-// The mic source can be added/removed mid-recording (setMic) by connecting to /
-// disconnecting from `mix`. Capturing a tab mutes its audio for the user until
-// you reconnect it to the output — that `tabSource.connect(ctx.destination)`
-// line is the unmute fix.
+// Each pcmTap (AudioWorklet) posts Float32 blocks → int16 PCM → its own
+// WebSocket. The mic channel can be added/removed mid-recording (setMic).
+// Capturing a tab mutes its audio until you reconnect it to the output — that
+// `tabSource.connect(ctx.destination)` line is the unmute fix.
 
 import type { RecState } from './state';
 import type { Message } from './types';
@@ -26,21 +25,66 @@ import type { Word } from './transcript';
 const WORKLET_URL = 'pcm-worklet.js';
 const WORKLET_NAME = 'pcm-tap';
 
-interface Session {
-  ctx: AudioContext;
+// One ASR stream: a PCM-tap worklet feeding a WebSocket to the scribe service.
+interface Channel {
   ws: WebSocket;
   node: AudioWorkletNode;
-  /** The summing node the tab + (optional) mic feed; the live mic add/remove point. */
-  mix: GainNode;
+  source: MediaStreamAudioSourceNode;
+  /** Wall-clock (epoch ms) of this stream's first PCM sample — its time origin. */
+  captureStartEpoch: number | null;
+  /** Set when we close it deliberately, so the close handler doesn't react. */
+  closing: boolean;
+  /** The stream's full transcript, kept to resend if the background loses words. */
+  words: Word[];
+}
+
+interface Session {
+  ctx: AudioContext;
   tabStream: MediaStream;
   micStream: MediaStream | null;
-  micSource: MediaStreamAudioSourceNode | null;
-  /** Wall-clock (epoch ms) of the first PCM sample sent — the join's time origin. */
-  captureStartEpoch: number | null;
+  tab: Channel;
+  mic: Channel | null;
+  stream: StreamOpts;
+}
+
+// Per-recording settings every channel's socket needs.
+interface StreamOpts {
+  wsUrl: string;
   debug: boolean;
+  /** Names the recording on the streaming service, which saves audio under it. */
+  sessionId: string;
+  saveAudio: boolean;
+  /** Participant names the streaming service should boost. */
+  boost: string[];
 }
 
 let session: Session | null = null;
+
+// Bumped by every start and stop. A start still awaiting capture when a stop
+// (or another start) lands sees a newer number and backs out, releasing what
+// it opened, instead of recording while the background thinks it's idle.
+let generation = 0;
+// Whether the user wants the mic; checked again once it has opened, so toggling
+// it off (or on twice) while permission/capture is pending can't leave a hot
+// mic or a second socket.
+let micWanted = false;
+let micOpening = false;
+
+// Each meeting tab's last reported mute state. While the captured tab's is
+// true, the mic streams silence: you're muted, so it isn't recorded. Keyed by
+// tab because every meeting tab reports (a second Meet tab with its mic off
+// must not silence this one), and kept outside the session so a report that
+// lands before start() knows its tab isn't lost.
+const mutedByTab = new Map<number, boolean>();
+// Each meeting tab's mic as the page opened it, by label (device ids differ per
+// origin; labels don't). The recording's mic opens the captured tab's, and
+// follows it when the meeting switches mics.
+const meetingMicByTab = new Map<number, string>();
+let micOpenedFor: string | undefined;
+const SILENT_MIC_SECONDS = 20;
+let captureTabId: number | null = null;
+const micMuted = (): boolean =>
+  captureTabId !== null && mutedByTab.get(captureTabId) === true;
 
 function sendState(patch: Partial<RecState>): void {
   chrome.runtime
@@ -83,16 +127,42 @@ async function captureTabStream(streamId: string): Promise<MediaStream> {
 }
 
 // Mic permission must already be granted via the micsetup page; the offscreen
-// doc can't prompt. Returns null (and warns) if it isn't granted.
-async function openMicStream(): Promise<MediaStream | null> {
+// doc can't prompt. Returns null (and warns) if it isn't granted. Echo
+// cancellation keeps meeting audio from the speakers out of the mic stream,
+// which would otherwise transcribe remote speech a second time as "Me".
+// The device is the meeting's own mic when it's known, else the system default
+// ('default'). Both are `exact`: an unset or merely preferred deviceId lets
+// Chrome pick the top of its own ranking of mics chosen in sites before, which
+// can be a virtual device (BlackHole) that's silent unless something feeds it.
+async function micDeviceId(label: string | undefined): Promise<string> {
+  if (!label) return 'default';
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return (
+    devices.find((d) => d.kind === 'audioinput' && d.label === label)
+      ?.deviceId ?? 'default'
+  );
+}
+
+const openMic = (deviceId: string): Promise<MediaStream> =>
+  navigator.mediaDevices.getUserMedia({
+    audio: {
+      deviceId: { exact: deviceId },
+      echoCancellation: true,
+      noiseSuppression: false,
+      autoGainControl: false,
+    },
+    video: false,
+  });
+
+async function openMicStream(
+  label: string | undefined,
+): Promise<MediaStream | null> {
   try {
-    return await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
-      video: false,
+    const deviceId = await micDeviceId(label);
+    // The meeting's mic can be unplugged between its report and now.
+    return await openMic(deviceId).catch((error: unknown) => {
+      if (deviceId === 'default') throw error;
+      return openMic('default');
     });
   } catch (error) {
     console.warn('[offscreen] mic capture failed', error);
@@ -112,16 +182,233 @@ function floatToInt16(input: Float32Array): ArrayBuffer {
   return out.buffer;
 }
 
-async function start(opts: {
-  streamId: string;
-  withMic: boolean;
-  wsUrl: string;
-  debug: boolean;
-}): Promise<void> {
+// Wire one audio source through a PCM-tap worklet to its own WebSocket. The tab
+// channel is `primary`: its socket dropping ends the whole session, whereas the
+// mic dropping just removes the mic.
+function openChannel(
+  ctx: AudioContext,
+  source: MediaStreamAudioSourceNode,
+  stream: StreamOpts,
+  channelName: 'tab' | 'mic',
+  primary: boolean,
+): Channel {
+  const { wsUrl, debug } = stream;
+  const node = new AudioWorkletNode(ctx, WORKLET_NAME, {
+    numberOfInputs: 1,
+    numberOfOutputs: 1,
+    outputChannelCount: [1],
+  });
+  source.connect(node);
+  // A worklet only runs while connected to a destination; route its (silent)
+  // output through a muted gain so it pulls audio without adding to playback.
+  const sink = ctx.createGain();
+  sink.gain.value = 0;
+  node.connect(sink).connect(ctx.destination);
+
+  const ws = new WebSocket(wsUrl);
+  ws.binaryType = 'arraybuffer';
+  const channel: Channel = {
+    ws,
+    node,
+    source,
+    captureStartEpoch: null,
+    closing: false,
+    words: [],
+  };
+
+  ws.addEventListener('open', () => {
+    ws.send(
+      JSON.stringify({
+        sampleRate: ctx.sampleRate,
+        sessionId: stream.sessionId,
+        channel: channelName,
+        save: stream.saveAudio,
+        boost: stream.boost,
+      }),
+    );
+    if (debug) {
+      console.log(`[offscreen] ${channelName} ws open @ ${ctx.sampleRate} Hz`);
+    }
+  });
+
+  ws.addEventListener('message', (e) => {
+    try {
+      const msg = JSON.parse(e.data as string) as {
+        type: string;
+        from?: number;
+        words?: Word[];
+      };
+      if (msg.type !== 'words' || !session) return;
+      const from = msg.from ?? 0;
+      channel.words.splice(from, Infinity, ...(msg.words ?? []));
+      sendWords(channel, channelName, from);
+    } catch (error) {
+      console.warn('[offscreen] bad ws message', error);
+    }
+  });
+
+  ws.addEventListener('error', () => {
+    if (primary) {
+      sendState({
+        status: 'idle',
+        error: `Cannot reach streaming service at ${wsUrl}`,
+      });
+      teardown();
+    } else {
+      console.warn('[offscreen] mic stream error; dropping mic');
+      removeMic();
+    }
+  });
+  ws.addEventListener('close', () => {
+    if (channel.closing) return; // deliberate (stop / mic toggled off)
+    if (primary) {
+      if (session) sendState({ status: 'idle' });
+      teardown();
+    } else {
+      removeMic();
+    }
+  });
+
+  // Samples of unbroken digital silence from the mic while not muted: a device
+  // that delivers nothing (wrong input, or an OS-level mute), not a quiet room,
+  // which still carries noise.
+  let zeroSamples = 0;
+  let warnedSilent = false;
+
+  node.port.addEventListener('message', (e: MessageEvent) => {
+    if (!session || ws.readyState !== WebSocket.OPEN) return;
+    if (channel.captureStartEpoch === null) {
+      channel.captureStartEpoch = Date.now();
+      // The stream's clock, so saved audio can be lined up with the transcript.
+      ws.send(JSON.stringify({ epoch: channel.captureStartEpoch }));
+    }
+    const data = e.data as Float32Array;
+    // While muted, stream silence on the mic channel: your voice never leaves
+    // the machine and isn't transcribed, but the stream stays time-aligned.
+    const gated = channelName === 'mic' && micMuted();
+    const pcm = gated ? new Int16Array(data.length).buffer : floatToInt16(data);
+    ws.send(pcm);
+    if (channelName === 'mic' && !gated && !warnedSilent) {
+      zeroSamples = data.every((x) => x === 0) ? zeroSamples + data.length : 0;
+      if (zeroSamples >= ctx.sampleRate * SILENT_MIC_SECONDS) {
+        warnedSilent = true;
+        const device = session.micStream?.getAudioTracks()[0]?.label;
+        const which = device ? ` (${device})` : '';
+        sendState({
+          warning: `Your microphone${which} is sending pure silence, so your voice isn't being transcribed. Check the input device in your system settings, then restart the recording.`,
+        });
+      }
+    }
+  });
+  node.port.start();
+
+  return channel;
+}
+
+// Forward a stream's words from index `from` on to the background.
+function sendWords(
+  channel: Channel,
+  channelName: 'tab' | 'mic',
+  from: number,
+): void {
+  chrome.runtime
+    .sendMessage({
+      type: 'TRANSCRIPT_UPDATE',
+      target: 'background',
+      channel: channelName,
+      from,
+      words: channel.words.slice(from),
+      captureStartEpoch: channel.captureStartEpoch ?? Date.now(),
+    } satisfies Message)
+    .catch(() => {});
+}
+
+function closeChannel(ch: Channel): void {
+  ch.closing = true;
+  try {
+    ch.node.disconnect();
+    ch.source.disconnect();
+  } catch {
+    /* already gone */
+  }
+  if (
+    ch.ws.readyState === WebSocket.OPEN ||
+    ch.ws.readyState === WebSocket.CONNECTING
+  ) {
+    ch.ws.close();
+  }
+}
+
+async function addMic(): Promise<void> {
+  if (!session || session.mic || micOpening) return;
+  micOpening = true;
+  const label =
+    captureTabId === null ? undefined : meetingMicByTab.get(captureTabId);
+  const micStream = await openMicStream(label).finally(() => {
+    micOpening = false;
+  });
+  if (!micStream) return;
+  // The session may have ended, or the mic been toggled off, meanwhile.
+  if (!session || session.mic || !micWanted) {
+    for (const t of micStream.getTracks()) t.stop();
+    return;
+  }
+  const micSource = session.ctx.createMediaStreamSource(micStream);
+  session.micStream = micStream;
+  micOpenedFor = label;
+  const track = micStream.getAudioTracks()[0];
+  const settings = track?.getSettings() ?? {};
+  sendState({
+    micDevice: `${track?.label || 'unknown device'} (${JSON.stringify({
+      deviceId: settings.deviceId,
+      groupId: settings.groupId,
+      sampleRate: settings.sampleRate,
+      channelCount: settings.channelCount,
+      echoCancellation: settings.echoCancellation,
+      muted: track?.muted,
+      readyState: track?.readyState,
+    })})`,
+  });
+  session.mic = openChannel(
+    session.ctx,
+    micSource,
+    session.stream,
+    'mic',
+    false,
+  );
+  console.log('[offscreen] mic added');
+}
+
+function removeMic(): void {
+  if (!session?.mic) return;
+  closeChannel(session.mic);
+  for (const t of session.micStream?.getTracks() ?? []) t.stop();
+  session.mic = null;
+  session.micStream = null;
+  micOpenedFor = undefined;
+  console.log('[offscreen] mic removed');
+}
+
+async function start(
+  opts: StreamOpts & { streamId: string; withMic: boolean; tabId: number },
+): Promise<void> {
   if (session) return;
+  const gen = ++generation;
+  captureTabId = opts.tabId;
+  micWanted = opts.withMic;
+
+  // Opened here before the session owns them, so a failure or a stop midway
+  // releases them too.
+  let tabStream: MediaStream | undefined;
+  let ctx: AudioContext | undefined;
+  const release = (): void => {
+    for (const t of tabStream?.getTracks() ?? []) t.stop();
+    ctx?.close().catch(() => {});
+  };
 
   try {
-    const tabStream = await captureTabStream(opts.streamId);
+    tabStream = await captureTabStream(opts.streamId);
+    if (gen !== generation) return release();
     const tabAudio = tabStream.getAudioTracks()[0];
     if (!tabAudio)
       throw new Error(
@@ -129,163 +416,71 @@ async function start(opts: {
       );
     tabAudio.enabled = true;
 
-    const micStream = opts.withMic ? await openMicStream() : null;
-
-    const ctx = new AudioContext();
+    ctx = new AudioContext();
     await ctx.resume().catch(() => {});
     await ctx.audioWorklet.addModule(chrome.runtime.getURL(WORKLET_URL));
+    if (gen !== generation) return release();
 
     const tabSource = ctx.createMediaStreamSource(new MediaStream([tabAudio]));
     tabSource.connect(ctx.destination); // unmute: user keeps hearing the meeting
 
-    // Mix tab (+ mic) down to a single node feeding the PCM tap.
-    const mix = ctx.createGain();
-    tabSource.connect(mix);
-    let micSource: MediaStreamAudioSourceNode | null = null;
-    if (micStream) {
-      micSource = ctx.createMediaStreamSource(micStream);
-      micSource.connect(mix);
-    }
-
-    // The worklet runs the PCM tap on the audio thread (replaces the deprecated
-    // ScriptProcessorNode). Route its (silent) output through a muted gain to the
-    // destination so the graph keeps pulling it without doubling the audio.
-    const node = new AudioWorkletNode(ctx, WORKLET_NAME, {
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      outputChannelCount: [1],
-    });
-    mix.connect(node);
-    const sink = ctx.createGain();
-    sink.gain.value = 0;
-    node.connect(sink).connect(ctx.destination);
-
-    const ws = new WebSocket(opts.wsUrl);
-    ws.binaryType = 'arraybuffer';
-
-    ws.addEventListener('open', () => {
-      ws.send(JSON.stringify({ sampleRate: ctx.sampleRate }));
-      if (opts.debug) console.log(`[offscreen] ws open @ ${ctx.sampleRate} Hz`);
-    });
-
-    ws.addEventListener('message', (e) => {
-      try {
-        const msg = JSON.parse(e.data as string) as {
-          type: string;
-          text?: string;
-          words?: Word[];
-        };
-        if (msg.type !== 'partial' || !session) return;
-        chrome.runtime
-          .sendMessage({
-            type: 'TRANSCRIPT_UPDATE',
-            target: 'background',
-            words: msg.words ?? [],
-            text: msg.text ?? '',
-            captureStartEpoch: session.captureStartEpoch ?? Date.now(),
-          } satisfies Message)
-          .catch(() => {});
-      } catch (error) {
-        console.warn('[offscreen] bad ws message', error);
-      }
-    });
-
-    ws.addEventListener('error', () => {
-      sendState({
-        status: 'idle',
-        error: `Cannot reach streaming service at ${opts.wsUrl}`,
-      });
-      teardown();
-    });
-    ws.addEventListener('close', () => {
-      if (session) sendState({ status: 'idle' });
-      teardown();
-    });
-
-    // Each message is a Float32 block of mixed mono audio from the worklet.
-    node.port.addEventListener('message', (e: MessageEvent) => {
-      if (!session || ws.readyState !== WebSocket.OPEN) return;
-      if (session.captureStartEpoch === null)
-        session.captureStartEpoch = Date.now();
-      ws.send(floatToInt16(e.data as Float32Array));
-    });
-    node.port.start();
-
+    const stream: StreamOpts = {
+      wsUrl: opts.wsUrl,
+      debug: opts.debug,
+      sessionId: opts.sessionId,
+      saveAudio: opts.saveAudio,
+      boost: opts.boost,
+    };
     session = {
       ctx,
-      ws,
-      node,
-      mix,
       tabStream,
-      micStream,
-      micSource,
-      captureStartEpoch: null,
-      debug: opts.debug,
+      micStream: null,
+      tab: openChannel(ctx, tabSource, stream, 'tab', true),
+      mic: null,
+      stream,
     };
-    console.log(`[offscreen] streaming started (mic: ${micStream !== null})`);
+
+    if (opts.withMic) await addMic();
+    if (gen !== generation) return;
+
+    console.log(`[offscreen] streaming started (mic: ${session?.mic != null})`);
     sendState({ status: 'recording' });
   } catch (error) {
-    teardown();
+    if (session) teardown();
+    else release();
     const message = error instanceof Error ? error.message : String(error);
     console.error('[offscreen] start failed:', message);
     sendState({ status: 'idle', error: message });
   }
 }
 
-// Add/remove the mic in the running graph when the toggle flips mid-recording.
-async function setMic(enabled: boolean): Promise<void> {
-  if (!session) return;
-
-  if (enabled && !session.micStream) {
-    const micStream = await openMicStream();
-    if (!micStream) return;
-    // The session may have ended while we awaited the mic permission.
-    if (!session) {
-      for (const t of micStream.getTracks()) t.stop();
-      return;
-    }
-    const micSource = session.ctx.createMediaStreamSource(micStream);
-    micSource.connect(session.mix);
-    session.micStream = micStream;
-    session.micSource = micSource;
-    console.log('[offscreen] mic added live');
-  } else if (!enabled && session.micStream) {
-    session.micSource?.disconnect();
-    for (const t of session.micStream.getTracks()) t.stop();
-    session.micStream = null;
-    session.micSource = null;
-    console.log('[offscreen] mic removed live');
-  }
-}
-
 function stop(): void {
+  generation++;
   if (!session) return;
   console.log('[offscreen] stop requested');
-  // Closing the socket flushes the server; teardown stops the tracks/graph.
+  // Closing the sockets flushes the server; teardown stops the tracks/graph.
   teardown();
   sendState({ status: 'idle' });
 }
 
 function teardown(): void {
+  generation++; // a start still in flight must not report "recording"
+  // The offscreen doc outlives recordings; the next one starts unmuted unless
+  // the content script reports otherwise (it does just before each start).
+  mutedByTab.clear();
+  meetingMicByTab.clear();
+  captureTabId = null;
   if (!session) return;
   const s = session;
-  session = null; // null first so the close handler doesn't re-enter
-  try {
-    s.node.disconnect();
-  } catch {
-    /* already gone */
-  }
-  if (
-    s.ws.readyState === WebSocket.OPEN ||
-    s.ws.readyState === WebSocket.CONNECTING
-  )
-    s.ws.close();
+  session = null; // null first so the close handlers don't re-enter
+  closeChannel(s.tab);
+  if (s.mic) closeChannel(s.mic);
   for (const t of s.tabStream.getTracks()) t.stop();
   for (const t of s.micStream?.getTracks() ?? []) t.stop();
   s.ctx.close().catch(() => {});
 }
 
-chrome.runtime.onMessage.addListener((message: Message) => {
+chrome.runtime.onMessage.addListener((message: Message, sender) => {
   if (message.target !== 'offscreen') return;
   switch (message.type) {
     case 'OFFSCREEN_START': {
@@ -296,9 +491,41 @@ chrome.runtime.onMessage.addListener((message: Message) => {
       void setMic(message.enabled);
       break;
     }
+    case 'MEETING_MIC': {
+      const tab = sender.tab?.id;
+      if (tab === undefined) break;
+      meetingMicByTab.set(tab, message.label);
+      // The meeting switched mics mid-recording: follow it.
+      if (
+        tab === captureTabId &&
+        session?.mic &&
+        micOpenedFor !== message.label
+      ) {
+        removeMic();
+        void addMic();
+      }
+      break;
+    }
+    case 'MUTE_STATE': {
+      if (sender.tab?.id !== undefined)
+        mutedByTab.set(sender.tab.id, message.muted);
+      break;
+    }
     case 'OFFSCREEN_STOP': {
       stop();
       break;
     }
+    case 'OFFSCREEN_RESYNC': {
+      if (session) sendWords(session.tab, 'tab', 0);
+      if (session?.mic) sendWords(session.mic, 'mic', 0);
+      break;
+    }
   }
 });
+
+async function setMic(enabled: boolean): Promise<void> {
+  micWanted = enabled;
+  if (!session) return;
+  if (enabled) await addMic();
+  else removeMic();
+}

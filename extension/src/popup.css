@@ -84,6 +84,16 @@ button.primary:disabled {
   cursor: default;
 }
 
+button.secondary {
+  padding: 7px;
+  font-size: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
 .options {
   margin-top: 14px;
   display: flex;
@@ -144,6 +154,18 @@ button.primary:disabled {
   display: none;
 }
 
+.warning {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 184, 77, 0.14);
+  border: 1px solid rgba(255, 184, 77, 0.4);
+  color: #ffb84d;
+}
+.warning.hidden {
+  display: none;
+}
+
 .result {
   margin-top: 14px;
   border-top: 1px solid #2c303a;
@@ -193,4 +215,11 @@ button.primary:disabled {
 .raw {
   color: var(--fg);
   white-space: pre-wrap;
+}
+
+.build {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #6b7280;
+  text-align: right;
 }

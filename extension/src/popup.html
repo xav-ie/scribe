@@ -22,9 +22,16 @@
       </label>
 
       <label class="row">
+        <input type="checkbox" id="saveAudio" />
+        <span>Save audio on the streaming service</span>
+      </label>
+
+      <label class="row">
         <input type="checkbox" id="debug" />
         <span>Debug: log speaker detection</span>
       </label>
+
+      <button id="exportDebug" class="secondary">Download debug bundle</button>
 
       <label class="field">
         <span>Streaming service (WebSocket)</span>
@@ -33,12 +40,15 @@
     </section>
 
     <div id="error" class="error hidden"></div>
+    <div id="warning" class="warning hidden"></div>
 
     <section id="result" class="result hidden">
       <h2>Live transcript</h2>
       <div id="speakers" class="speakers"></div>
       <div id="transcript" class="script"></div>
     </section>
+
+    <footer id="build" class="build"></footer>
 
     <script type="module" src="./popup.ts"></script>
   </body>

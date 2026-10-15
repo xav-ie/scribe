@@ -67,6 +67,19 @@ export const zoomAdapter: SpeakerAdapter = {
     return () => clearInterval(id);
   },
 
+  // Zoom's own audio button reads "mute my microphone" / "unmute my microphone";
+  // "unmute" (offered as the action) means you're currently muted. Matching "my
+  // microphone" skips participant-list buttons like "Mute Alice" or "Mute All".
+  // ⚠️ TUNE ME; null = don't gate the mic.
+  isMuted(): boolean | null {
+    const label = document
+      .querySelector('[aria-label*="my microphone" i]')
+      ?.getAttribute('aria-label')
+      ?.toLowerCase();
+    if (label === undefined) return null;
+    return label.includes('unmute');
+  },
+
   diagnose(): SpeakerDiagnostics {
     const tiles = [...document.querySelectorAll(TILE)].filter(isVisible);
     return {
