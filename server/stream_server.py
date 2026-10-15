@@ -36,6 +36,9 @@ A stream's first text message is {"sampleRate", "sessionId", "channel", "save",
 {"type": "end"} flushes the last partial step and is answered with the final
 words and {"type": "done"}; the stream should send no audio after it.
 
+/ws/watch/<sessionId> follows a session's streams while they run: the words so
+far, then every update their clients get (see LIVE).
+
 GET / serves ui.html, a browser for those sessions over the /api routes, and
 /mcp is an MCP server (streamable HTTP) for listing, reading and searching
 meeting transcripts, keeping cleanups of them (cleanups/<id>.json: notes and a
@@ -416,6 +419,23 @@ def _open_recording(config, src_rate):
     return Recording(session_id, channel, src_rate)
 
 
+# --- live streams ------------------------------------------------------------
+
+# Streams in progress, by session: {sessionId: {stream id: (channel, StreamState)}}.
+# Watchers of a session (/ws/watch, the web UI) get each stream's word updates,
+# the same {"type": "words", "from", "words"} its own client gets, tagged with
+# "stream" and "channel"; {"type": "closed", "stream"} ends one.
+LIVE = {}
+WATCHERS = {}
+
+
+def _publish(session_id, msg):
+    # ponytail: unbounded queues; a stalled watcher grows until it disconnects.
+    text = json.dumps(msg)
+    for queue in WATCHERS.get(session_id, ()):
+        queue.put_nowait(text)
+
+
 # --- session browser ---------------------------------------------------------
 
 UI_HTML = (Path(__file__).parent / "ui.html").read_text()
@@ -485,10 +505,8 @@ def ui():
 
 @app.get("/api/sessions")
 def list_sessions():
-    if not RECORDINGS.exists():
-        return []
     out = []
-    for folder in RECORDINGS.iterdir():
+    for folder in RECORDINGS.iterdir() if RECORDINGS.exists() else ():
         if not folder.is_dir() or not SESSION_ID_RE.fullmatch(folder.name):
             continue
         session = _read_session(folder) or {}
@@ -504,6 +522,24 @@ def list_sessions():
                 "channels": _channels(folder, with_words=False),
                 "hasRecord": bool(session),
                 "modified": folder.stat().st_mtime,
+                "live": folder.name in LIVE,
+            }
+        )
+    # Live sessions not saving audio have no folder yet.
+    listed = {s["sessionId"] for s in out}
+    for session_id in LIVE.keys() - listed:
+        out.append(
+            {
+                "sessionId": session_id,
+                "startedAt": None,
+                "stoppedAt": None,
+                "platform": None,
+                "speakers": [],
+                "words": 0,
+                "channels": [],
+                "hasRecord": False,
+                "modified": datetime.now(UTC).timestamp(),
+                "live": True,
             }
         )
     return sorted(
@@ -514,12 +550,14 @@ def list_sessions():
 @app.get("/api/sessions/{session_id}")
 def get_session(session_id: str):
     folder = _session_dir(session_id)
-    if not folder.is_dir():
+    live = session_id in LIVE
+    if not folder.is_dir() and not live:
         raise HTTPException(404)
     return {
         "sessionId": session_id,
         "session": _read_session(folder),
         "channels": _channels(folder, with_words=True),
+        "live": live,
     }
 
 
@@ -584,19 +622,20 @@ async def ws(websocket: WebSocket):
 
     sent = 0  # words the client has; the last of them may still grow
     connected = True
+    stream_id = uuid.uuid4().hex
+    live = None  # (sessionId, channel) once the stream says which meeting it is
 
     async def send():
         nonlocal sent, connected
-        if not connected:
-            return
         start = max(0, sent - 1)
         sent = len(state.words)
+        update = {"type": "words", "from": start, "words": state.words[start:]}
+        if live is not None:
+            _publish(live[0], {**update, "stream": stream_id, "channel": live[1]})
+        if not connected:
+            return
         try:
-            await websocket.send_text(
-                json.dumps(
-                    {"type": "words", "from": start, "words": state.words[start:]}
-                )
-            )
+            await websocket.send_text(json.dumps(update))
         except Exception:  # client gone: keep transcribing what it already sent
             logger.debug("word push failed; client disconnected", exc_info=True)
             connected = False
@@ -646,6 +685,10 @@ async def ws(websocket: WebSocket):
                     src_rate = int(config["sampleRate"])
                     if recording is None:
                         recording = _open_recording(config, src_rate)
+                    session_id = str(config.get("sessionId"))
+                    if live is None and SESSION_ID_RE.fullmatch(session_id):
+                        live = (session_id, str(config.get("channel") or "audio"))
+                        LIVE.setdefault(session_id, {})[stream_id] = (live[1], state)
                     phrases = _boost_phrases(config.get("boost"))
                     if phrases:
                         async with _gpu_lock:
@@ -677,11 +720,47 @@ async def ws(websocket: WebSocket):
         pass
     finally:
         reader.cancel()
+        if live is not None:
+            streams = LIVE.get(live[0], {})
+            streams.pop(stream_id, None)
+            if not streams:
+                LIVE.pop(live[0], None)
+            _publish(live[0], {"type": "closed", "stream": stream_id})
         async with _gpu_lock:
             await asyncio.to_thread(state.close)
         if recording is not None:
             # Keep the tail shorter than one step too, so the file is complete.
             recording.close(state.words, _to_16k(state.pending, src_rate))
+
+
+@app.websocket("/ws/watch/{session_id}")
+async def watch(websocket: WebSocket, session_id: str):
+    """Follow a session's live streams: each one's words so far as a "words"
+    update from 0, then the updates its client gets, as they happen."""
+    await websocket.accept()
+    queue = asyncio.Queue()
+    WATCHERS.setdefault(session_id, set()).add(queue)
+
+    async def forward():
+        for stream_id, (channel, state) in list(LIVE.get(session_id, {}).items()):
+            update = {"type": "words", "from": 0, "words": state.words}
+            await websocket.send_text(
+                json.dumps({**update, "stream": stream_id, "channel": channel})
+            )
+        while True:
+            await websocket.send_text(await queue.get())
+
+    # Reading the socket notices a closed tab even when no updates are coming.
+    sender = asyncio.create_task(forward())
+    try:
+        while (await websocket.receive())["type"] != "websocket.disconnect":
+            pass
+    finally:
+        sender.cancel()
+        watchers = WATCHERS.get(session_id, set())
+        watchers.discard(queue)
+        if not watchers:
+            WATCHERS.pop(session_id, None)
 
 
 # --- MCP ---------------------------------------------------------------------

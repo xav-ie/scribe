@@ -49,6 +49,24 @@
                 nixfmt --check flake.nix server/module.nix scribe-desktop/default.nix
                 touch $out
               '';
+          live =
+            pkgs.runCommand "scribe-live"
+              {
+                nativeBuildInputs = [
+                  (pkgs.python3.withPackages (p: [
+                    p.fastapi
+                    p.httpx
+                    p.numpy
+                    p.python-multipart
+                    p.scipy
+                    p.soundfile
+                  ]))
+                ];
+              }
+              ''
+                PYTHONDONTWRITEBYTECODE=1 python3 ${self}/server/test_live.py
+                touch $out
+              '';
           module =
             (nixpkgs.lib.nixosSystem {
               inherit system;

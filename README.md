@@ -48,7 +48,7 @@ with `podman` and the NVIDIA container toolkit.
 ## Development
 
 ```sh
-nix flake check          # ruff, nixfmt, scribe-desktop build, module eval
+nix flake check          # ruff, nixfmt, live fan-out test, scribe-desktop build, module eval
 cd extension && pnpm i && pnpm check && pnpm build
 ```
 

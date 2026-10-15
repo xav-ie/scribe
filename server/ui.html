@@ -233,8 +233,9 @@
             },
             el("td", { textContent: when(s.startedAt ?? s.modified * 1000) }),
             el("td", {
-              textContent:
-                s.stoppedAt && s.startedAt
+              textContent: s.live
+                ? "● live"
+                : s.stoppedAt && s.startedAt
                   ? clock((s.stoppedAt - s.startedAt) / 1000)
                   : "",
             }),
@@ -283,7 +284,8 @@
 
       async function show(id) {
         where.textContent = `/ ${id}`;
-        const { session, channels } = await api(`/api/sessions/${id}`);
+        const { session, channels, live } = await api(`/api/sessions/${id}`);
+        if (live) return watchLive(id);
 
         // Each saved stream plays against its own clock: the wall-clock epoch of
         // its first sample.
@@ -437,6 +439,39 @@
         app.replaceChildren(...body);
       }
 
+      // A session still recording: follow its streams over /ws/watch, applying
+      // each {"type": "words", "from", "words"} update the way the extension
+      // does (replace from index `from` on). Once every stream has closed, the
+      // saved session is loaded in its place.
+      let watching = null;
+      function watchLive(id) {
+        const streams = new Map(); // stream id -> { channel, words, pre }
+        const box = el("div");
+        app.replaceChildren(
+          el("p", { className: "muted", textContent: "● recording, live" }),
+          box,
+        );
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(`${proto}//${location.host}/ws/watch/${id}`);
+        watching = ws;
+        ws.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "words") {
+            let s = streams.get(msg.stream);
+            if (!s) {
+              s = { channel: msg.channel, words: [], pre: el("pre") };
+              streams.set(msg.stream, s);
+              box.append(el("h2", { textContent: msg.channel }), s.pre);
+            }
+            s.words.splice(msg.from, Infinity, ...msg.words);
+            s.pre.textContent = s.words.map((w) => w.word).join(" ");
+          } else if (msg.type === "closed") {
+            streams.delete(msg.stream);
+            if (streams.size === 0) setTimeout(route, 2000);
+          }
+        };
+      }
+
       // The global boost list: names and jargon scribe should favour when unsure.
       // Each stream also boosts its meeting's participant names.
       async function vocab() {
@@ -474,6 +509,8 @@
       }
 
       async function route() {
+        watching?.close();
+        watching = null;
         const m = location.hash.match(/^#\/s\/([0-9a-f-]{36})$/);
         try {
           await (location.hash === "#/vocab"
