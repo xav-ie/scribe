@@ -19,6 +19,18 @@
         "aarch64-linux"
       ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system} system);
+      # The server's web layer without the GPU stack, which the tests stub.
+      serverTestPython =
+        pkgs:
+        pkgs.python3.withPackages (p: [
+          p.fastapi
+          p.httpx
+          p.numpy
+          p.pytest
+          p.python-multipart
+          p.scipy
+          p.soundfile
+        ]);
     in
     {
       nixosModules.default = ./server/module.nix;
@@ -49,22 +61,14 @@
                 nixfmt --check flake.nix server/module.nix scribe-desktop/default.nix
                 touch $out
               '';
-          live =
-            pkgs.runCommand "scribe-live"
+          server-tests =
+            pkgs.runCommand "scribe-server-tests"
               {
-                nativeBuildInputs = [
-                  (pkgs.python3.withPackages (p: [
-                    p.fastapi
-                    p.httpx
-                    p.numpy
-                    p.python-multipart
-                    p.scipy
-                    p.soundfile
-                  ]))
-                ];
+                nativeBuildInputs = [ (serverTestPython pkgs) ];
               }
               ''
-                PYTHONDONTWRITEBYTECODE=1 python3 ${self}/server/test_live.py
+                cd ${self}/server
+                PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q -p no:cacheprovider tests
                 touch $out
               '';
           module =
@@ -83,6 +87,20 @@
                 }
               ];
             }).config.systemd.units."podman-scribe.service".unit;
+        }
+      );
+
+      devShells = forAll (
+        pkgs: _: {
+          default = pkgs.mkShell {
+            packages = [
+              (serverTestPython pkgs)
+              pkgs.nixfmt
+              pkgs.nodejs_24
+              pkgs.pnpm
+              pkgs.ruff
+            ];
+          };
         }
       );
 
