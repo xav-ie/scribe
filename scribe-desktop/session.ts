@@ -15,7 +15,8 @@ import Soup from "gi://Soup?version=3.0";
 // down fires super+1, super+Escape, ...) and XWayland apps read their keycodes
 // against the real keymap, so text arrives as garbage.
 
-const URL = "wss://scribe.lalala.casa/ws";
+// $SCRIBE_URL overrides the server, e.g. ws://localhost:8000/ws.
+const URL = GLib.getenv("SCRIBE_URL") ?? "wss://scribe.lalala.casa/ws";
 const RATE = 16000;
 const HOLD_MS = 500;
 // Give up on scribe's final words after this long and use what arrived.
