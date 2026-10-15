@@ -6,7 +6,7 @@ export const BUILD =
   chrome.runtime.getManifest().version;
 
 export interface Settings {
-  /** WebSocket URL of the streaming ASR service, e.g. wss://scribe.lalala.casa/ws */
+  /** WebSocket URL of the streaming ASR service. Edited on the options page. */
   wsUrl: string;
   /** Capture the user's microphone alongside the tab audio. */
   withMic: boolean;
@@ -16,7 +16,7 @@ export interface Settings {
   saveAudio: boolean;
 }
 
-const DEFAULT_SETTINGS: Settings = {
+export const DEFAULT_SETTINGS: Settings = {
   wsUrl: 'wss://scribe.lalala.casa/ws',
   withMic: false,
   debug: false,

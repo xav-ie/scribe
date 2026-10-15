@@ -223,3 +223,11 @@ button.secondary {
   color: #6b7280;
   text-align: right;
 }
+.field code {
+  word-break: break-all;
+}
+body.options-page {
+  width: auto;
+  max-width: 480px;
+  margin: 24px auto;
+}

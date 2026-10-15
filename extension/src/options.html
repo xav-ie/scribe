@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meeting Capture settings</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body class="options-page">
+    <header>
+      <h1>Settings</h1>
+    </header>
+
+    <form id="form" class="options">
+      <label class="field">
+        <span>Streaming service (WebSocket URL)</span>
+        <input
+          type="url"
+          id="wsUrl"
+          spellcheck="false"
+          required
+          placeholder="wss://scribe.example.com/ws"
+        />
+      </label>
+      <button type="submit" class="primary">Save</button>
+      <button type="button" id="reset" class="secondary">
+        Reset to default
+      </button>
+    </form>
+
+    <div id="error" class="error hidden"></div>
+    <div id="saved" class="warning hidden"></div>
+
+    <footer id="build" class="build"></footer>
+
+    <script type="module" src="./options.ts"></script>
+  </body>
+</html>

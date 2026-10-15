@@ -21,6 +21,10 @@ export default defineManifest({
     48: 'public/icons/icon48.png',
     128: 'public/icons/icon128.png',
   },
+  options_ui: {
+    page: 'src/options.html',
+    open_in_tab: true,
+  },
   action: {
     default_popup: 'src/popup.html',
     default_title: 'Meeting Capture',
@@ -40,8 +44,15 @@ export default defineManifest({
     'scripting',
   ],
   // Streaming service endpoints: the WebSocket the offscreen doc streams PCM to,
-  // and the HTTP API the worker posts session records to. A host must be listed
-  // here or the connection is blocked.
+  // and the HTTP API the worker posts session records to. The default service
+  // and local dev are granted at install; any other server set on the options
+  // page is requested there from optional_host_permissions.
+  optional_host_permissions: [
+    'wss://*/*',
+    'https://*/*',
+    'ws://*/*',
+    'http://*/*',
+  ],
   host_permissions: [
     'wss://scribe.lalala.casa/*', // deployed streaming ASR service
     'https://scribe.lalala.casa/*', // its session API: records posted at stop

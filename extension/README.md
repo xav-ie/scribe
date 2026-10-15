@@ -76,7 +76,8 @@ tuning (see below).
 - **`src/speaker/`** — the active-speaker scraper (content script). `meet.ts` and
   `zoom.ts` are per-platform adapters; `index.ts` wires the matching one and
   reports changes; `transcript.ts` holds the timestamp-join logic.
-- **`src/popup.{html,ts,css}`** — start/stop, settings, and the live play-script
+- **`src/options.{html,ts}`** — the settings page: server URL and its host permission
+- **`src/popup.{html,ts,css}`** — start/stop, toggles, and the live play-script
   transcript (speaker legend + colour-coded turns).
 - **`src/micsetup.{html,ts}`** — one-time microphone permission grant (the
   offscreen doc can't show a prompt).
@@ -167,13 +168,13 @@ set.
 
 ## Configure the service
 
-Set the streaming ASR **WebSocket URL** in the popup (persisted via
-`chrome.storage`). Default: `wss://scribe.lalala.casa/ws`.
+Set the streaming ASR **WebSocket URL** on the extension's options page
+(**settings** link in the popup, or right-click the icon → Options). It is
+persisted via `chrome.storage`. Default: `wss://scribe.lalala.casa/ws`.
 
-To point it at a different host, set it in the popup **and** add that origin to
-`host_permissions` in `manifest.config.ts`, then rebuild — the WebSocket is
-blocked for any host not listed there. The deployed service and a local
-`ws://localhost:8000` are pre-listed.
+Saving a URL on another host asks Chrome for access to it (from
+`optional_host_permissions`); the default service and a local
+`ws://localhost:8000` are granted at install.
 
 ## Service contract
 

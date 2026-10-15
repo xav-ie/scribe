@@ -24,7 +24,7 @@ const micToggle = $<HTMLInputElement>('withMic');
 const debugToggle = $<HTMLInputElement>('debug');
 const saveAudioToggle = $<HTMLInputElement>('saveAudio');
 const exportBtn = $<HTMLButtonElement>('exportDebug');
-const wsUrlInput = $<HTMLInputElement>('wsUrl');
+const wsUrlEl = $<HTMLElement>('wsUrl');
 const micSetupLink = $<HTMLAnchorElement>('micSetup');
 const errorEl = $<HTMLElement>('error');
 const warningEl = $<HTMLElement>('warning');
@@ -82,7 +82,7 @@ async function init(): Promise<void> {
   micToggle.checked = settings.withMic;
   debugToggle.checked = settings.debug;
   saveAudioToggle.checked = settings.saveAudio;
-  wsUrlInput.value = settings.wsUrl;
+  wsUrlEl.textContent = settings.wsUrl;
   $<HTMLElement>('build').textContent = BUILD;
 
   render(await getState());
@@ -115,10 +115,10 @@ saveAudioToggle.addEventListener(
   'change',
   () => void setSettings({ saveAudio: saveAudioToggle.checked }),
 );
-wsUrlInput.addEventListener(
-  'change',
-  () => void setSettings({ wsUrl: wsUrlInput.value.trim() }),
-);
+$<HTMLAnchorElement>('openOptions').addEventListener('click', (event) => {
+  event.preventDefault();
+  chrome.runtime.openOptionsPage().catch(() => {});
+});
 
 // Everything needed to diagnose the last recording in one file: the transcript,
 // the join inputs (speaker timeline, per-stream words and clocks, adapter
