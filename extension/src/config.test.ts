@@ -51,6 +51,7 @@ describe('saveServerUrl', () => {
   });
 
   it('rejects a bad URL without checking access', async () => {
+    // eslint-disable-next-line unicorn/prefer-https -- http:// is the input being rejected
     const result = await saveServerUrl('http://asr.example.org/ws');
     expect(result).toMatchObject({ status: 'invalid' });
     expect(chromeStub.permissions.contains).not.toHaveBeenCalled();

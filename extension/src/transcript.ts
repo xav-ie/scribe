@@ -54,7 +54,8 @@ export function applyWords(
   from: number,
   words: readonly Word[],
 ): boolean {
-  if (!Number.isInteger(from) || from < 0 || from > target.length) return false;
+  if (!Number.isSafeInteger(from) || from < 0 || from > target.length)
+    return false;
   target.splice(from, Infinity, ...words);
   return true;
 }

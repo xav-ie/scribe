@@ -42,7 +42,7 @@ describe('applyWords', () => {
     expect(words(target)).toEqual(['a', 'b']);
   });
 
-  it.each([2, -1, 0.5, Number.NaN])(
+  it.each([2, -1, 0.5, NaN])(
     'refuses an update from %s, leaving the words alone',
     (from) => {
       const target = [w('a', 0)];

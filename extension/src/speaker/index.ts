@@ -130,6 +130,8 @@ function start(adapter: SpeakerAdapter): void {
   // same-origin iframes); an iframe only reports once it has found
   // participants, which keeps the meeting's own frame and silences unrelated
   // ones such as Zoom's chat widget.
+  // prefer-global-this and no-unnecessary-global-this disagree here.
+  // eslint-disable-next-line unicorn/no-unnecessary-global-this
   const isTop = globalThis.top === globalThis.self;
   let foundTiles = false;
   let probes = 0;

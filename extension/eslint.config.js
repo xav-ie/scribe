@@ -51,6 +51,26 @@ export default defineConfig([
       'n/no-unsupported-features/node-builtins': 'off',
       // `ctx`, `msg`, `err`, `opts` are deliberate, idiomatic names here.
       'unicorn/prevent-abbreviations': 'off',
+      'unicorn/name-replacements': 'off',
+      // Chrome event listeners fire and forget: `.catch(() => {})` there is
+      // deliberate, and the service worker keeps module state on purpose.
+      'unicorn/prefer-await': 'off',
+      'unicorn/no-top-level-assignment-in-function': 'off',
+      // Naming, comment layout and control-flow shape are left to review;
+      // these rules' rewrites (ternaries, early returns, inverted guards)
+      // read worse here than the code they replace.
+      'unicorn/consistent-boolean-name': 'off',
+      'unicorn/single-line-block-comment-style': 'off',
+      'unicorn/prefer-ternary': 'off',
+      'unicorn/prefer-early-return': 'off',
+      'unicorn/prefer-continue': 'off',
+      'unicorn/prefer-combined-guards': 'off',
+      'unicorn/prefer-simple-condition-first': 'off',
+      'unicorn/prefer-minimal-ternary': 'off',
+      'unicorn/prefer-logical-operator-over-ternary': 'off',
+      'unicorn/no-unreadable-for-of-expression': 'off',
+      // `.then(onOk, onError)` maps a promise to a value on purpose.
+      'unicorn/prefer-then-catch': 'off',
       // `null` is part of the chrome/DOM API surface we mirror.
       'unicorn/no-null': 'off',
     },
@@ -60,6 +80,14 @@ export default defineConfig([
     files: ['manifest.config.ts'],
     rules: {
       'sonarjs/no-clear-text-protocols': 'off',
+    },
+  },
+  {
+    // The test setup installs a fake `chrome` global for the code under test.
+    files: ['src/test/**'],
+    rules: {
+      'unicorn/no-global-object-property-assignment': 'off',
+      'unicorn/no-top-level-side-effects': 'off',
     },
   },
   {

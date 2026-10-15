@@ -74,7 +74,7 @@ const TYPES = {
 export async function servePreview(state, pages = {}) {
   const server = createServer((req, res) => {
     const { pathname } = new URL(req.url ?? '/', 'http://localhost');
-    if (pages[pathname]) {
+    if (Object.hasOwn(pages, pathname)) {
       res.writeHead(200, { 'Content-Type': 'text/html' }).end(pages[pathname]);
       return;
     }
@@ -88,7 +88,8 @@ export async function servePreview(state, pages = {}) {
     let body = readFileSync(file);
     const type = TYPES[path.extname(file)];
     if (type === 'text/html') {
-      body = body.toString().replace('<head>', `<head>${stub(state())}`);
+      // A function, so `$` sequences in the stub are inserted as written.
+      body = body.toString().replace('<head>', () => `<head>${stub(state())}`);
     }
     res.writeHead(200, type ? { 'Content-Type': type } : {}).end(body);
   });
