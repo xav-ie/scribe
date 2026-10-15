@@ -1,12 +1,45 @@
+/* Inter and Maple Mono, Latin subsets from Fontsource 5.3.0, bundled under the
+   SIL Open Font License (public/licenses/). */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fonts/inter-latin-variable.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/maple-mono-latin-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/maple-mono-latin-700.woff2') format('woff2');
+}
+
+/* The logo's palette: a copper brown ground and a recording red. */
 :root {
-  --bg: #1b1d23;
-  --fg: #e7e9ee;
-  --muted: #9aa0ab;
-  --accent: #4f8cff;
-  --danger: #ff5d5d;
-  --ok: #43c463;
-  --field: #262932;
+  --bg: #5c2f18;
+  --surface: #4a2512;
+  --border: #7a4426;
+  --fg: #f8ece3;
+  --muted: #e0c3ae;
+  --rec: #ff4136;
+  --accent: #d92d20;
+  --link: #ffb3a1;
+  --danger: #ffb3a1;
+  --warn: #ffd08a;
+  --ok: #a6e3a1;
+  --field: var(--surface);
+  --sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --mono: 'Maple Mono', ui-monospace, monospace;
   color-scheme: dark;
+  accent-color: var(--rec);
 }
 
 * {
@@ -17,10 +50,7 @@ body {
   width: 320px;
   margin: 0;
   padding: 14px;
-  font:
-    13px/1.4 system-ui,
-    -apple-system,
-    sans-serif;
+  font: 13px/1.4 var(--sans);
   background: var(--bg);
   color: var(--fg);
 }
@@ -28,6 +58,7 @@ body {
 header {
   display: flex;
   align-items: center;
+  gap: 8px;
   justify-content: space-between;
   margin-bottom: 12px;
 }
@@ -53,16 +84,16 @@ h2 {
   letter-spacing: 0.03em;
 }
 .status.idle {
-  background: #333742;
+  background: var(--surface);
   color: var(--muted);
 }
 .status.recording {
-  background: rgba(255, 93, 93, 0.16);
-  color: var(--danger);
+  background: var(--rec);
+  color: white;
 }
 .status.finalizing {
-  background: rgba(79, 140, 255, 0.16);
-  color: var(--accent);
+  background: var(--surface);
+  color: var(--link);
 }
 
 button.primary {
@@ -77,7 +108,9 @@ button.primary {
   cursor: pointer;
 }
 button.primary.recording {
-  background: var(--danger);
+  background: var(--surface);
+  border: 1px solid var(--rec);
+  color: var(--fg);
 }
 button.primary:disabled {
   opacity: 0.6;
@@ -87,10 +120,10 @@ button.primary:disabled {
 button.secondary {
   padding: 7px;
   font-size: 12px;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--link);
   border-radius: 8px;
   background: transparent;
-  color: var(--accent);
+  color: var(--link);
   cursor: pointer;
 }
 
@@ -122,14 +155,14 @@ button.secondary {
 .field input {
   padding: 6px 8px;
   border-radius: 6px;
-  border: 1px solid #353a45;
+  border: 1px solid var(--border);
   background: var(--field);
   color: var(--fg);
-  font: inherit;
+  font: 12px var(--mono);
 }
 
 .link {
-  color: var(--accent);
+  color: var(--link);
   font-size: 11px;
   text-decoration: none;
 }
@@ -144,8 +177,8 @@ button.secondary {
   margin-top: 12px;
   padding: 8px 10px;
   border-radius: 6px;
-  background: rgba(255, 93, 93, 0.14);
-  border: 1px solid rgba(255, 93, 93, 0.4);
+  background: rgba(255, 65, 54, 0.18);
+  border: 1px solid rgba(255, 65, 54, 0.6);
   color: var(--danger);
   font-size: 12px;
   word-break: break-word;
@@ -158,9 +191,9 @@ button.secondary {
   margin-top: 12px;
   padding: 8px 10px;
   border-radius: 6px;
-  background: rgba(255, 184, 77, 0.14);
-  border: 1px solid rgba(255, 184, 77, 0.4);
-  color: #ffb84d;
+  background: rgba(255, 208, 138, 0.12);
+  border: 1px solid rgba(255, 208, 138, 0.45);
+  color: var(--warn);
 }
 .warning.hidden {
   display: none;
@@ -168,7 +201,7 @@ button.secondary {
 
 .result {
   margin-top: 14px;
-  border-top: 1px solid #2c303a;
+  border-top: 1px solid var(--border);
   padding-top: 10px;
   max-height: 240px;
   overflow-y: auto;
@@ -215,16 +248,19 @@ button.secondary {
 .raw {
   color: var(--fg);
   white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
 }
 
 .build {
   margin-top: 12px;
-  font-size: 11px;
-  color: #6b7280;
+  font: 11px var(--mono);
+  color: var(--muted);
   text-align: right;
 }
 .field code {
   word-break: break-all;
+  font-family: var(--mono);
 }
 body.options-page {
   width: auto;
@@ -253,8 +289,8 @@ body.options-page {
   margin-top: 16px;
   padding: 12px 14px;
   border-radius: 8px;
-  border: 1px solid var(--accent);
-  background: rgba(79, 140, 255, 0.08);
+  border: 1px solid var(--rec);
+  background: rgba(255, 65, 54, 0.1);
 }
 .access.hidden {
   display: none;
@@ -262,7 +298,7 @@ body.options-page {
 .panel {
   margin-top: 24px;
   padding-top: 16px;
-  border-top: 1px solid #2c303a;
+  border-top: 1px solid var(--border);
 }
 .panel h2 {
   font-size: 14px;
@@ -310,4 +346,12 @@ button.hidden {
   width: auto;
   padding: 8px 16px;
   font-size: 13px;
+}
+
+.mark {
+  width: 28px;
+  height: 28px;
+}
+header h1 {
+  flex: 1;
 }

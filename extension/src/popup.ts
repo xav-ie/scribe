@@ -1,3 +1,4 @@
+import logo from '../../assets/logo/scribe.svg';
 import { BUILD, getSettings, setSettings } from './config';
 import {
   getState,
@@ -18,6 +19,7 @@ const LABELS: Record<RecordingStatus, string> = {
 
 const UNKNOWN = 'Unknown';
 
+$<HTMLImageElement>('mark').src = logo;
 const recordBtn = $<HTMLButtonElement>('record');
 const statusEl = $<HTMLSpanElement>('status');
 const micToggle = $<HTMLInputElement>('withMic');
@@ -163,7 +165,7 @@ micSetupLink.addEventListener('click', (e) => {
 function speakerColor(name: string): string {
   let hash = 0;
   for (const ch of name) hash = (hash * 31 + (ch.codePointAt(0) ?? 0)) % 360;
-  return `hsl(${hash} 70% 68%)`;
+  return `hsl(${hash} 75% 76%)`;
 }
 
 // Whether the transcript is scrolled to (near) the bottom — used to keep it

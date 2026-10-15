@@ -1,6 +1,6 @@
 // Regenerates the extension icons from the logo: just its shell (the spiral
-// sound wave), enlarged to fill the icon so it reads at toolbar size, in a
-// green that shows on light and dark toolbars. Smaller icons get a thicker
+// sound wave), enlarged to fill the icon so it reads at toolbar size, in the
+// recording red, which shows on light and dark toolbars. Smaller icons get a thicker
 // line. Run with: pnpm icons   (requires ImageMagick's `magick` with librsvg)
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -23,7 +23,7 @@ if (!shell) throw new Error('shell path not found in scribe.svg');
 // The shell's bounds in logo units, padded by its stroke.
 const CENTER = [222.5, 210.9];
 const SCALE = 2.6;
-const COLOR = '#2bb58a';
+const COLOR = '#ff4136';
 // Stroke width (logo units, before SCALE) per icon size.
 const sizes = { 16: 14, 32: 12, 48: 12, 128: 10 };
 
