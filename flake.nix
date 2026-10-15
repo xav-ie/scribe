@@ -1,17 +1,14 @@
 {
-  description = "Live meeting transcription: streaming ASR server, Chrome capture extension, and desktop dictation";
+  description = "Live meeting transcription: a streaming ASR server and a Chrome capture extension";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    ags.url = "github:aylur/ags";
-    ags.inputs.nixpkgs.follows = "nixpkgs";
   };
 
   outputs =
     {
       self,
       nixpkgs,
-      ags,
     }:
     let
       systems = [
@@ -35,16 +32,8 @@
     {
       nixosModules.default = ./server/module.nix;
 
-      packages = forAll (
-        pkgs: system: {
-          scribe-desktop = pkgs.callPackage ./scribe-desktop { agsPackages = ags.packages.${system}; };
-          default = self.packages.${system}.scribe-desktop;
-        }
-      );
-
       checks = forAll (
         pkgs: system: {
-          inherit (self.packages.${system}) scribe-desktop;
           lint =
             pkgs.runCommand "scribe-lint"
               {
@@ -58,7 +47,7 @@
                 export RUFF_NO_CACHE=true
                 ruff check server
                 ruff format --check server
-                nixfmt --check flake.nix server/module.nix scribe-desktop/default.nix
+                nixfmt --check flake.nix server/module.nix
                 touch $out
               '';
           server-tests =
@@ -91,33 +80,11 @@
       );
 
       devShells = forAll (
-        pkgs: system: {
-          # scribe-desktop's type check: GIR files for scripts/types.sh and the
-          # AGS JS library tsc resolves `ags` from.
-          desktop = pkgs.mkShell {
-            packages = [
-              pkgs.nodejs_24
-              pkgs.pnpm
-            ];
-            GIR_PATH = pkgs.lib.makeSearchPath "share/gir-1.0" (
-              map pkgs.lib.getDev [
-                pkgs.gdk-pixbuf
-                pkgs.glib
-                pkgs.gobject-introspection
-                pkgs.graphene
-                pkgs.gtk4
-                pkgs.harfbuzz
-                pkgs.libsoup_3
-                pkgs.pango
-                ags.packages.${system}.astal4
-                ags.packages.${system}.io
-              ]
-            );
-            AGS_JS = ags.packages.${system}.default.jsPackage;
-          };
+        pkgs: _: {
           default = pkgs.mkShell {
             packages = [
               (serverTestPython pkgs)
+              pkgs.imagemagick
               pkgs.nixfmt
               pkgs.nodejs_24
               pkgs.pnpm

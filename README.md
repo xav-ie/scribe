@@ -5,8 +5,8 @@
 Live meeting transcription on your own GPU. A browser extension streams a
 meeting's audio to a self-hosted speech recognition server, which sends back
 captions as people talk, labels who said what, and keeps every meeting
-searchable by AI agents over MCP. The same server also powers push-to-talk
-dictation on the desktop.
+searchable by AI agents over MCP. The same server also powers live dictation
+on the desktop with [scribe-desktop](https://github.com/xav-ie/scribe-desktop).
 
 ![The extension's popup over a Google Meet call, showing the live transcript with each line labeled by speaker](assets/screenshot.png)
 
@@ -14,7 +14,6 @@ dictation on the desktop.
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`server/`](server)                 | FastAPI service running NVIDIA's `parakeet-unified-en-0.6b` (NeMo) with buffered streaming on CUDA. Takes 16 kHz PCM on `/ws` and streams back words with timestamps. Also serves an OpenAI-style `/v1/audio/transcriptions` endpoint, a web UI for saved sessions, and an MCP server (`/mcp`) to list, read, and search meeting transcripts and manage a vocabulary that boosts names and jargon. |
 | [`extension/`](extension)           | Chrome extension that captures a meeting tab's audio (Zoom, Google Meet) plus your own mic as a separate stream, and attributes each word to a speaker by joining word timestamps against the meeting's active-speaker indicator. Each meeting's participant names are boosted for its stream. See [`extension/README.md`](extension/README.md).                                                   |
-| [`scribe-desktop/`](scribe-desktop) | AGS (GTK4) daemon for Hyprland: hold a key to talk and paste on release, or tap to type live until the next tap. Records with PipeWire and types through Hyprland. Set `SCRIBE_URL` to point it at your server.                                                                                                                                                                                    |
 
 ## Requirements
 
@@ -22,8 +21,6 @@ dictation on the desktop.
   It refuses to start without CUDA. The model is downloaded from Hugging Face
   on first start.
 - The extension: Chrome (or another Chromium) on any OS.
-- scribe-desktop: Linux with PipeWire and a recent Hyprland (it types through
-  `hyprctl eval` and the Lua dispatcher API).
 
 > [!WARNING]
 > The server has **no authentication**. Anyone who can reach it can stream
@@ -38,9 +35,8 @@ dictation on the desktop.
 > `services.scribe.allowedHosts`) refuses requests for host names other than
 > yours, which stops DNS rebinding attacks from pages your browser visits.
 
-Neither the extension nor scribe-desktop comes with a server: set yours on the
-extension's options page (it opens on install) and in `SCRIBE_URL` for
-scribe-desktop.
+The extension doesn't come with a server: set yours on its options page, which
+opens on install.
 
 ## Server
 
@@ -132,45 +128,14 @@ resends the rest. Times are seconds from the stream's first sample. Send
 `{"type": "end"}` to flush the audio still buffered; the server replies with the
 final update and `{"type": "done"}`.
 
-## scribe-desktop
-
-```nix
-# home-manager
-{ inputs, pkgs, ... }:
-let
-  scribe-desktop = inputs.scribe.packages.${pkgs.stdenv.hostPlatform.system}.scribe-desktop;
-  request = cmd: "busctl --user call io.Astal.scribe-desktop /io/Astal/Application io.Astal.Application Request as 1 ${cmd}";
-in {
-  systemd.user.services.scribe-desktop = {
-    Unit.PartOf = [ "graphical-session.target" ];
-    Unit.After = [ "graphical-session.target" ];
-    Service = {
-      Type = "dbus";
-      BusName = "io.Astal.scribe-desktop";
-      ExecStart = "${scribe-desktop}/bin/scribe-desktop";
-      Environment = [ "SCRIBE_URL=wss://scribe.example.com/ws" ];
-      Restart = "on-failure";
-    };
-    Install.WantedBy = [ "graphical-session.target" ];
-  };
-}
-```
-
-Bind one key to `request "press"` on press and `request "release"` on release
-in Hyprland. Calling the daemon over D-Bus keeps tap and hold timing accurate.
-Hold the key to talk; the text is typed when you let go. Tap it to type live
-as you speak, until the next tap.
-
 ## Development
 
 ```sh
 nix develop                  # python + pytest, ruff, nixfmt, node, pnpm
-nix flake check              # ruff, nixfmt, server tests, scribe-desktop build, module eval
+nix flake check              # ruff, nixfmt, server tests, module eval
 pytest server/tests          # the server's tests on their own (no GPU: the ML stack is stubbed)
 cd extension && pnpm i && pnpm check && pnpm build
 
-# scribe-desktop: tsc, eslint, prettier (generates GObject types first)
-nix develop .#desktop -c bash -c 'cd scribe-desktop && pnpm i && pnpm check'
 ```
 
 The server tests cover the HTTP and WebSocket protocol, saving, watchers,
