@@ -104,7 +104,7 @@ const run = (argv: string[], stdin?: string) =>
       );
       proc.communicate_utf8_async(stdin ?? null, null, () => resolve());
     } catch (e) {
-      console.error(`dictate: ${argv[0]} failed`, e);
+      console.error(`scribe-desktop: ${argv[0]} failed`, e);
       resolve();
     }
   });
@@ -262,7 +262,7 @@ async function finish() {
 }
 
 function fail(why: string, err?: unknown) {
-  console.error(`dictate: ${why}`, err ?? "");
+  console.error(`scribe-desktop: ${why}`, err ?? "");
   recorder?.force_exit();
   conn = null;
   setPhase("error");

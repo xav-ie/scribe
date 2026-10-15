@@ -1,5 +1,5 @@
 # Live dictation into scribe, bundled into a gjs binary with AGS (Astal). A
-# resident daemon (the `dictate` systemd user service) driven by Hyprland's
+# resident daemon (the `scribe-desktop` systemd user service) driven by Hyprland's
 # super+g press/release binds: it records with pw-record, streams to scribe's
 # WebSocket, and types through hyprctl (send_shortcut). See session.ts.
 {
@@ -18,7 +18,7 @@
   fontName ? "sans-serif",
 }:
 stdenv.mkDerivation {
-  name = "dictate";
+  name = "scribe-desktop";
   src = ./.;
 
   postPatch = ''
@@ -53,7 +53,7 @@ stdenv.mkDerivation {
   installPhase = ''
     runHook preInstall
     mkdir -p $out/bin
-    ags bundle app.ts $out/bin/dictate
+    ags bundle app.ts $out/bin/scribe-desktop
     runHook postInstall
   '';
 }

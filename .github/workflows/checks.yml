@@ -34,7 +34,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm ${{ matrix.task }}
 
-  dictate-format:
+  scribe-desktop-format:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -51,7 +51,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: extension/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec prettier --check ../dictate
+      - run: pnpm exec prettier --check ../scribe-desktop
 
   nix:
     runs-on: ubuntu-latest

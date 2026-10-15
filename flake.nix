@@ -25,14 +25,14 @@
 
       packages = forAll (
         pkgs: system: {
-          dictate = pkgs.callPackage ./dictate { agsPackages = ags.packages.${system}; };
-          default = self.packages.${system}.dictate;
+          scribe-desktop = pkgs.callPackage ./scribe-desktop { agsPackages = ags.packages.${system}; };
+          default = self.packages.${system}.scribe-desktop;
         }
       );
 
       checks = forAll (
         pkgs: system: {
-          inherit (self.packages.${system}) dictate;
+          inherit (self.packages.${system}) scribe-desktop;
           lint =
             pkgs.runCommand "scribe-lint"
               {
@@ -46,7 +46,7 @@
                 export RUFF_NO_CACHE=true
                 ruff check server
                 ruff format --check server
-                nixfmt --check flake.nix server/module.nix dictate/default.nix
+                nixfmt --check flake.nix server/module.nix scribe-desktop/default.nix
                 touch $out
               '';
           module =

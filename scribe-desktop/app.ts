@@ -3,11 +3,11 @@ import style from "./style.scss";
 import Bubble from "./Bubble";
 import { press, release } from "./session";
 
-// Resident dictation daemon, started by the `dictate` systemd user service.
+// Resident dictation daemon, started by the `scribe-desktop` systemd user service.
 // Hyprland's super+g press/release binds reach it over D-Bus
-// (io.Astal.dictate Request), without spawning a process per keypress.
+// (io.Astal.scribe-desktop Request), without spawning a process per keypress.
 app.start({
-  instanceName: "dictate",
+  instanceName: "scribe-desktop",
   css: style,
   gtkTheme: "Adwaita",
   requestHandler(argv, res) {

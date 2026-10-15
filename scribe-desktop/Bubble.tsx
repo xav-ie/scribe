@@ -77,8 +77,8 @@ export default function Bubble() {
 
   return (
     <window
-      name="dictate"
-      namespace="dictate"
+      name="scribe-desktop"
+      namespace="scribe-desktop"
       anchor={BOTTOM}
       layer={Astal.Layer.OVERLAY}
       exclusivity={Astal.Exclusivity.IGNORE}
