@@ -43,6 +43,22 @@ export interface Channel {
 
 const UNKNOWN_SPEAKER = 'Unknown';
 
+/**
+ * Apply one streamed update: the stream's words from index `from` on are
+ * replaced by `words` (only the last word sent before can still change). An
+ * update starting past the words held means some went missing; it is refused
+ * (false) so the caller can ask for the full list instead.
+ */
+export function applyWords(
+  target: Word[],
+  from: number,
+  words: readonly Word[],
+): boolean {
+  if (!Number.isInteger(from) || from < 0 || from > target.length) return false;
+  target.splice(from, Infinity, ...words);
+  return true;
+}
+
 // The active-speaker UI lights up a little AFTER someone starts talking, so to
 // find the speaker for a word spoken at wall-clock T, we look at the timeline a
 // bit later, where the UI had caught up. 900 ms best matched TitaNet voiceprints

@@ -13,6 +13,7 @@ import { dlog, expose, setDebug } from './debug';
 import type { SpeakerDiagnostics } from './speaker/types';
 import { getState, JOIN_SESSION_KEY as SESSION_KEY, setState } from './state';
 import {
+  applyWords,
   mergeTranscript,
   type Channel,
   type SpeakerSpan,
@@ -412,7 +413,7 @@ async function onTranscriptUpdate(
   }
   // Updates only carry new words, so one starting past what we hold means words
   // went missing: ask the offscreen doc to resend its full lists.
-  if (from > target.length) {
+  if (!applyWords(target, from, words)) {
     if (!resyncRequested) {
       resyncRequested = true;
       chrome.runtime
@@ -425,7 +426,6 @@ async function onTranscriptUpdate(
     return;
   }
   if (from === 0) resyncRequested = false;
-  target.splice(from, Infinity, ...words);
   saveSession();
   scheduleRecompute();
 }

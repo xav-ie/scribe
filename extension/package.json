@@ -19,10 +19,12 @@
     "check:lint": "eslint .",
     "check:format": "prettier --check .",
     "check:knip": "knip",
+    "check:test": "vitest run",
     "lint": "eslint . --fix",
     "format": "prettier --write .",
     "changeset": "changeset",
-    "version": "changeset version && pnpm install --lockfile-only"
+    "version": "changeset version && pnpm install --lockfile-only",
+    "test": "vitest"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.1",
@@ -42,6 +44,7 @@
     "prettier": "^3.8.3",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.59.2",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "vitest": "^3.2.7"
   }
 }

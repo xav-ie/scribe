@@ -19,7 +19,7 @@
 
 import type { RecState } from './state';
 import type { Message } from './types';
-import type { Word } from './transcript';
+import { applyWords, type Word } from './transcript';
 
 // The PCM tap worklet module (public/pcm-worklet.js, copied to the dist root).
 const WORKLET_URL = 'pcm-worklet.js';
@@ -240,7 +240,10 @@ function openChannel(
       };
       if (msg.type !== 'words' || !session) return;
       const from = msg.from ?? 0;
-      channel.words.splice(from, Infinity, ...(msg.words ?? []));
+      if (!applyWords(channel.words, from, msg.words ?? [])) {
+        console.warn('[offscreen] word update past the end', from);
+        return;
+      }
       sendWords(channel, channelName, from);
     } catch (error) {
       console.warn('[offscreen] bad ws message', error);
