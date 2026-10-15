@@ -1,0 +1,47 @@
+{
+  "name": "meeting-capture-extension",
+  "version": "0.1.0",
+  "description": "Chrome MV3 extension that streams meeting tab audio (Zoom, Google Meet, ...) to a self-hosted streaming ASR service and attributes captions to speakers by scraping the meeting's active-speaker indicator.",
+  "type": "module",
+  "license": "MIT",
+  "private": true,
+  "packageManager": "pnpm@10.26.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "icons": "node scripts/make-icons.mjs",
+    "check": "concurrently -c auto 'pnpm:check:*'",
+    "check:types": "tsc --noEmit",
+    "check:lint": "eslint .",
+    "check:format": "prettier --check .",
+    "check:knip": "knip",
+    "lint": "eslint . --fix",
+    "format": "prettier --write .",
+    "changeset": "changeset",
+    "version": "changeset version && pnpm install --lockfile-only"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.1",
+    "@crxjs/vite-plugin": "^2.0.0-beta.36",
+    "@eslint/js": "^10.0.1",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^25.6.0",
+    "concurrently": "^9.2.1",
+    "eslint": "^10.3.0",
+    "eslint-plugin-import-x": "^4.16.2",
+    "eslint-plugin-n": "^18.0.1",
+    "eslint-plugin-regexp": "^3.1.0",
+    "eslint-plugin-sonarjs": "^4.0.3",
+    "eslint-plugin-unicorn": "^64.0.0",
+    "globals": "^17.6.0",
+    "knip": "^6.12.0",
+    "prettier": "^3.8.3",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.59.2",
+    "vite": "^5.4.11"
+  }
+}

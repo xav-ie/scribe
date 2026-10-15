@@ -1,0 +1,103 @@
+name: Release
+
+# Changeset-driven, mirroring the bento-analytics flow but targeting a GitHub
+# Release (with the built .zip) instead of an npm publish.
+#
+# Normal cycle:
+#   1. Feature PRs land on main carrying a `.changeset/*.md` (run `pnpm changeset`).
+#   2. changesets/action opens / force-updates a rolling "Version Packages" PR
+#      that bumps package.json + writes CHANGELOG.md and consumes the changesets.
+#   3. Merge that PR. The next push to main has no pending changesets, so we
+#      build, zip dist/, and cut a `vX.Y.Z` GitHub Release using the new
+#      CHANGELOG section as the notes.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  # Serialize release runs — the "Version Packages" PR state lives in the repo,
+  # so parallel runs would trip over each other.
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push tags / the Version Packages branch, create Releases
+  pull-requests: write # open / update the Version Packages PR
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # With pending changesets → open/update the Version Packages PR (no build).
+      # With none → this is a no-op and the next step does the release.
+      - name: Create Version Packages PR
+        id: changesets
+        uses: changesets/action@v1.9.0
+        with:
+          version: pnpm run version
+          commit: 'chore: version packages'
+          title: 'chore: version packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # No changesets left → the Version PR was just merged. Build the bumped
+      # version and publish a Release (idempotent: skips if the tag exists, and
+      # waits until the first changeset has produced a CHANGELOG).
+      - name: Build and publish GitHub Release
+        if: steps.changesets.outputs.hasChangesets == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="v${VERSION}"
+
+          if [ ! -f CHANGELOG.md ]; then
+            echo "No CHANGELOG.md yet — add a changeset (pnpm changeset) to start releasing."
+            exit 0
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — nothing to do."
+            exit 0
+          fi
+
+          pnpm check
+          pnpm build
+
+          # Zip the contents of dist/ so manifest.json sits at the zip root —
+          # the layout the Chrome Web Store and "Load unpacked" expect.
+          ( cd dist && zip -r "../meeting-capture-extension-${VERSION}.zip" . )
+
+          # Latest CHANGELOG section (from the first `## ` heading to the next).
+          awk '/^## /{n++} n==1' CHANGELOG.md > release-notes.md
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            "meeting-capture-extension-${VERSION}.zip"
+
+  # --- Optional: publish to the Chrome Web Store --------------------------------
+  # Add a step to the job above (after the release is created) once the extension
+  # has a CWS listing and these repo secrets are set:
+  #   CWS_EXTENSION_ID, CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN
+  #
+  #   - uses: mnao305/chrome-extension-upload@v5
+  #     if: steps.changesets.outputs.hasChangesets == 'false'
+  #     with:
+  #       file-path: meeting-capture-extension-*.zip
+  #       extension-id: ${{ secrets.CWS_EXTENSION_ID }}
+  #       client-id: ${{ secrets.CWS_CLIENT_ID }}
+  #       client-secret: ${{ secrets.CWS_CLIENT_SECRET }}
+  #       refresh-token: ${{ secrets.CWS_REFRESH_TOKEN }}
+  #       publish: true

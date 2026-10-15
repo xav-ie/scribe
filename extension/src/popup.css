@@ -1,0 +1,196 @@
+:root {
+  --bg: #1b1d23;
+  --fg: #e7e9ee;
+  --muted: #9aa0ab;
+  --accent: #4f8cff;
+  --danger: #ff5d5d;
+  --ok: #43c463;
+  --field: #262932;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 320px;
+  margin: 0;
+  padding: 14px;
+  font:
+    13px/1.4 system-ui,
+    -apple-system,
+    sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+h1 {
+  font-size: 15px;
+  margin: 0;
+}
+
+h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 0 0 6px;
+}
+
+.status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.status.idle {
+  background: #333742;
+  color: var(--muted);
+}
+.status.recording {
+  background: rgba(255, 93, 93, 0.16);
+  color: var(--danger);
+}
+.status.finalizing {
+  background: rgba(79, 140, 255, 0.16);
+  color: var(--accent);
+}
+
+button.primary {
+  width: 100%;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+}
+button.primary.recording {
+  background: var(--danger);
+}
+button.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.options {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.row span {
+  flex: 1;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.field input {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #353a45;
+  background: var(--field);
+  color: var(--fg);
+  font: inherit;
+}
+
+.link {
+  color: var(--accent);
+  font-size: 11px;
+  text-decoration: none;
+}
+.link:hover {
+  text-decoration: underline;
+}
+.link.granted {
+  color: var(--ok);
+}
+
+.error {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 93, 93, 0.14);
+  border: 1px solid rgba(255, 93, 93, 0.4);
+  color: var(--danger);
+  font-size: 12px;
+  word-break: break-word;
+}
+.error.hidden {
+  display: none;
+}
+
+.result {
+  margin-top: 14px;
+  border-top: 1px solid #2c303a;
+  padding-top: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.result.hidden {
+  display: none;
+}
+
+/* Legend of speakers detected this session. */
+.speakers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.speakers:empty {
+  display: none;
+}
+.chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--c);
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  background: color-mix(in srgb, var(--c) 14%, transparent);
+}
+
+/* Play-script transcript: one coloured speaker header + line per turn. */
+.script .turn {
+  margin-bottom: 10px;
+}
+.script .speaker {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  margin-bottom: 1px;
+}
+.script .line {
+  color: var(--fg);
+}
+
+/* Un-attributed running transcript shown before any speaker events arrive. */
+.raw {
+  color: var(--fg);
+  white-space: pre-wrap;
+}

@@ -1,0 +1,173 @@
+import { getSettings, setSettings } from './config';
+import { getState, onStateChange, type RecState } from './state';
+import type { Message, RecordingStatus } from './types';
+import type { Segment } from './transcript';
+
+const $ = <T extends HTMLElement>(id: string) =>
+  document.querySelector(`#${id}`) as T;
+
+const LABELS: Record<RecordingStatus, string> = {
+  idle: 'Start recording',
+  recording: 'Stop recording',
+};
+
+const UNKNOWN = 'Unknown';
+
+const recordBtn = $<HTMLButtonElement>('record');
+const statusEl = $<HTMLSpanElement>('status');
+const micToggle = $<HTMLInputElement>('withMic');
+const debugToggle = $<HTMLInputElement>('debug');
+const wsUrlInput = $<HTMLInputElement>('wsUrl');
+const micSetupLink = $<HTMLAnchorElement>('micSetup');
+const errorEl = $<HTMLElement>('error');
+const resultEl = $<HTMLElement>('result');
+const speakersEl = $<HTMLElement>('speakers');
+const transcriptEl = $<HTMLElement>('transcript');
+
+// The popup is a pure reflection of chrome.storage.local state — it never holds
+// authoritative status of its own, so closing/reopening it is always accurate.
+function render(state: RecState): void {
+  statusEl.textContent = state.status;
+  statusEl.className = `status ${state.status}`;
+
+  recordBtn.textContent = LABELS[state.status];
+  recordBtn.classList.toggle('recording', state.status === 'recording');
+
+  if (state.error) {
+    errorEl.textContent = state.error;
+    errorEl.classList.remove('hidden');
+  } else {
+    errorEl.classList.add('hidden');
+  }
+
+  if (state.segments && state.segments.length > 0) {
+    renderSegments(state.segments);
+  } else if (state.rawText) {
+    renderRaw(state.rawText);
+  } else {
+    resultEl.classList.add('hidden');
+  }
+}
+
+function applyMicPermission(permission: PermissionState): void {
+  const granted = permission === 'granted';
+  micSetupLink.textContent = granted ? 'access granted ✓' : 'grant access';
+  micSetupLink.classList.toggle('granted', granted);
+}
+
+async function trackMicPermission(): Promise<void> {
+  try {
+    const status = await navigator.permissions.query({
+      name: 'microphone' as PermissionName,
+    });
+    applyMicPermission(status.state);
+    status.addEventListener('change', () => applyMicPermission(status.state));
+  } catch {
+    // permissions.query may not support "microphone" everywhere; leave default.
+  }
+}
+
+async function init(): Promise<void> {
+  const settings = await getSettings();
+  micToggle.checked = settings.withMic;
+  debugToggle.checked = settings.debug;
+  wsUrlInput.value = settings.wsUrl;
+
+  render(await getState());
+  onStateChange(render);
+  await trackMicPermission();
+}
+
+recordBtn.addEventListener('click', () => {
+  const type = recordBtn.classList.contains('recording')
+    ? 'STOP_RECORDING'
+    : 'START_RECORDING';
+  chrome.runtime.sendMessage({ type, target: 'background' } satisfies Message);
+});
+
+micToggle.addEventListener(
+  'change',
+  () => void setSettings({ withMic: micToggle.checked }),
+);
+debugToggle.addEventListener(
+  'change',
+  () => void setSettings({ debug: debugToggle.checked }),
+);
+wsUrlInput.addEventListener(
+  'change',
+  () => void setSettings({ wsUrl: wsUrlInput.value.trim() }),
+);
+
+micSetupLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  chrome.tabs.create({ url: chrome.runtime.getURL('src/micsetup.html') });
+});
+
+// Deterministic per-speaker colour so each person reads consistently across the
+// legend and the script.
+function speakerColor(name: string): string {
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + (ch.codePointAt(0) ?? 0)) % 360;
+  return `hsl(${hash} 70% 68%)`;
+}
+
+// Whether the transcript is scrolled to (near) the bottom — used to keep it
+// pinned to the newest line as it streams in, without fighting a manual scroll-up.
+function nearBottom(): boolean {
+  return (
+    resultEl.scrollHeight - resultEl.scrollTop - resultEl.clientHeight < 40
+  );
+}
+
+// Speaker-attributed transcript, rendered like a play script: a coloured speaker
+// header per turn, their line beneath, plus a legend of everyone detected.
+function renderSegments(segments: readonly Segment[]): void {
+  const stick = nearBottom();
+
+  const names = [...new Set(segments.map((s) => s.speaker))];
+  const shown = names.filter((n) => n !== UNKNOWN);
+  speakersEl.replaceChildren();
+  for (const name of shown.length > 0 ? shown : names) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = name;
+    chip.style.setProperty('--c', speakerColor(name));
+    speakersEl.append(chip);
+  }
+
+  transcriptEl.replaceChildren();
+  for (const seg of segments) {
+    const turn = document.createElement('div');
+    turn.className = 'turn';
+
+    const who = document.createElement('div');
+    who.className = 'speaker';
+    who.textContent = seg.speaker;
+    who.style.color = speakerColor(seg.speaker);
+
+    const line = document.createElement('div');
+    line.className = 'line';
+    line.textContent = seg.text;
+
+    turn.append(who, line);
+    transcriptEl.append(turn);
+  }
+
+  resultEl.classList.remove('hidden');
+  if (stick) resultEl.scrollTop = resultEl.scrollHeight;
+}
+
+// Before any speaker events arrive there's nothing to attribute — show the raw
+// running transcript so you can see the stream is working.
+function renderRaw(text: string): void {
+  speakersEl.replaceChildren();
+  transcriptEl.replaceChildren();
+  const div = document.createElement('div');
+  div.className = 'raw';
+  div.textContent = text;
+  transcriptEl.append(div);
+  resultEl.classList.remove('hidden');
+  resultEl.scrollTop = resultEl.scrollHeight;
+}
+
+await init();

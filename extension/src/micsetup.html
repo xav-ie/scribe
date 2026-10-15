@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Meeting Capture — Microphone access</title>
+    <style>
+      body {
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+        max-width: 480px;
+        margin: 64px auto;
+        padding: 0 24px;
+        color: #1b1d23;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      button {
+        padding: 10px 16px;
+        font-size: 14px;
+        font-weight: 600;
+        border: none;
+        border-radius: 8px;
+        background: #4f8cff;
+        color: white;
+        cursor: pointer;
+      }
+      #state {
+        margin-top: 16px;
+        font-weight: 600;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .pending {
+        color: #8a6d00;
+      }
+      .ok {
+        color: #2a8a44;
+      }
+      .err {
+        color: #c43030;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Grant microphone access</h1>
+    <p>
+      The capture engine runs in a background (offscreen) page that cannot show
+      a permission prompt. Grant access once here and the extension can include
+      your microphone in future recordings.
+    </p>
+    <button id="grant">Allow microphone</button>
+    <div id="state"></div>
+    <script type="module" src="./micsetup.ts"></script>
+  </body>
+</html>
