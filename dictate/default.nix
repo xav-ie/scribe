@@ -14,8 +14,8 @@
   libsoup_3,
   pipewire,
   wl-clipboard,
-  # System UI font, threaded in from lib/fonts.nix.
-  fontName,
+  # UI font family for the bubble.
+  fontName ? "sans-serif",
 }:
 stdenv.mkDerivation {
   name = "dictate";
