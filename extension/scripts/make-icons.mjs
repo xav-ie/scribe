@@ -1,7 +1,8 @@
 // Regenerates the extension icons from the logo: just its shell (the spiral
 // sound wave), enlarged to fill the icon so it reads at toolbar size, in the
 // recording red, which shows on light and dark toolbars. Smaller icons get a thicker
-// line. Run with: pnpm icons   (requires ImageMagick's `magick` with librsvg)
+// line. Run with: pnpm icons, inside `nix develop` for the pinned ImageMagick
+// that CI compares against
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,6 +41,10 @@ for (const [size, stroke] of Object.entries(sizes)) {
     file,
     '-resize',
     `${size}x${size}`,
+    // No timestamps or other metadata, so a rerun produces identical files.
+    '-strip',
+    '-define',
+    'png:exclude-chunks=date,time',
     path.join(out, `icon${size}.png`),
   ]);
 }

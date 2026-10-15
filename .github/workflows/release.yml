@@ -21,27 +21,28 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-permissions:
-  contents: write # push tags / the Version Packages branch, create Releases
-  pull-requests: write # open / update the Version Packages PR
+permissions: {}
 
 jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write # push tags / the Version Packages branch, create Releases
+      pull-requests: write # open / update the Version Packages PR
     defaults:
       run:
         working-directory: extension
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
         with:
           package_json_file: extension/package.json
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: "24"
           cache: pnpm
           cache-dependency-path: extension/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -50,12 +51,12 @@ jobs:
       # With none → this is a no-op and the next step does the release.
       - name: Create Version Packages PR
         id: changesets
-        uses: changesets/action@v1.9.0
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
           cwd: extension
           version: pnpm run version
-          commit: 'chore: version packages'
-          title: 'chore: version packages'
+          commit: "chore: version packages"
+          title: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

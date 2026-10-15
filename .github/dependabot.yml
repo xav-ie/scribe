@@ -1,0 +1,26 @@
+version: 2
+
+updates:
+  # The cooldown waits 14 days after a release before proposing it, so a
+  # compromised release that gets yanked within days never lands here.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /extension
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    open-pull-requests-limit: 5
+    groups:
+      npm:
+        patterns: ["*"]
