@@ -133,8 +133,7 @@ async function exportDebugBundle(): Promise<void> {
     chrome.storage.local.get(JOIN_SESSION_KEY),
   ]);
   const session = stored[JOIN_SESSION_KEY] as
-    | { sessionId?: string | null }
-    | undefined;
+    { sessionId?: string | null } | undefined;
   const bundle = {
     exportedAt: new Date().toISOString(),
     extensionVersion: BUILD,
