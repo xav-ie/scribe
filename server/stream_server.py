@@ -712,7 +712,9 @@ def _sessions_between(since, until):
 
 
 # Tile names that aren't people: unnamed tiles and recording bots.
-NOT_A_PERSON_RE = re.compile(r"^\?$|notetaker|fireflies|otter\.ai|read\.ai|fathom", re.IGNORECASE)
+NOT_A_PERSON_RE = re.compile(
+    r"^\?$|notetaker|fireflies|otter\.ai|read\.ai|fathom", re.IGNORECASE
+)
 
 
 def _participants(session):
@@ -723,7 +725,9 @@ def _participants(session):
     for snapshot in session.get("diagnostics") or []:
         for name in snapshot.get("names") or []:
             names.add(re.sub(r"\s*\([^)]*\)$", "", name).strip())
-    return sorted(n for n in names if n and n != "Unknown" and not NOT_A_PERSON_RE.search(n))
+    return sorted(
+        n for n in names if n and n != "Unknown" and not NOT_A_PERSON_RE.search(n)
+    )
 
 
 def _clock(sec):
