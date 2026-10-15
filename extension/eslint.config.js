@@ -56,8 +56,7 @@ export default defineConfig([
     },
   },
   {
-    // The transcription service runs on the local machine / trusted Tailscale
-    // net over plain HTTP — TLS isn't in play for these declared endpoints.
+    // Local development servers are plain ws:// and http:// on localhost.
     files: ['manifest.config.ts'],
     rules: {
       'sonarjs/no-clear-text-protocols': 'off',

@@ -12,7 +12,7 @@ dependencies = [
 
 [tool.uv]
 package = false
-# The environment validated by ~/Projects/asr-evals (NeMo 3.0.0, torch 2.14.0).
+# The full environment the server was validated with (NeMo 3.0.0, torch 2.14.0).
 constraint-dependencies = [
   "absl-py==2.5.0",
   "aiohappyeyeballs==2.7.1",

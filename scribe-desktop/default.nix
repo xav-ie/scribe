@@ -1,7 +1,7 @@
 # Live dictation into scribe, bundled into a gjs binary with AGS (Astal). A
-# resident daemon (the `scribe-desktop` systemd user service) driven by Hyprland's
-# super+g press/release binds: it records with pw-record, streams to scribe's
-# WebSocket, and types through hyprctl (send_shortcut). See session.ts.
+# resident daemon driven by Hyprland key press/release binds: it records with
+# pw-record, streams to scribe's WebSocket, and types through hyprctl
+# (send_shortcut). See session.ts and the README.
 {
   stdenv,
   wrapGAppsHook3,

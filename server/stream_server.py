@@ -1069,7 +1069,8 @@ def remove_vocab(phrases: list[str]) -> list[str]:
 
 
 # Served at /mcp. Mounted last so every route above takes precedence. Host
-# checks are off like the rest of the API; access is limited to the tailnet.
+# checks are off like the rest of the API: scribe has no authentication, so it
+# belongs on a private network or behind an authenticating proxy.
 _mcp_app = mcp.streamable_http_app(
     stateless_http=True,
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),

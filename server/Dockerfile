@@ -1,11 +1,9 @@
-# Runtime-built image (see build-scribe-image.service in scribe.nix, which
-# mirrors the whisperx precedent). The exact python env stays pinned by
-# pyproject.toml + uv.lock — the one validated by ~/Projects/asr-evals
-# (NeMo 3.0.0, torch 2.14.0) — but the ~3.9 GiB of CUDA wheels lives only in
-# podman's store instead of the system closure.
-# Fully qualified: this host's registries.conf defines no
-# unqualified-search-registries, so bare "python:3.12-slim" fails with
-# "short-name did not resolve to an alias".
+# Built on the host at runtime (build-scribe-image.service in module.nix). The
+# Python environment is pinned by pyproject.toml + uv.lock (NeMo 3.0.0, torch
+# 2.14.0), and its ~3.9 GiB of CUDA wheels live only in podman's store instead
+# of the system closure.
+# Fully qualified, so it builds without unqualified-search-registries set in
+# registries.conf.
 FROM docker.io/library/python:3.12-slim
 
 # soundfile dlopens libsndfile; ca-certificates for the HF model download.
