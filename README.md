@@ -47,9 +47,9 @@ flowchart LR
 > `services.scribe.allowedHosts`) refuses requests for host names other than
 > yours, which stops DNS rebinding attacks from pages your browser visits.
 
-The extension and scribe-desktop default to the author's server,
-`wss://scribe.lalala.casa/ws`. Point them at yours: the extension's options
-page, and `SCRIBE_URL` for scribe-desktop.
+Neither the extension nor scribe-desktop comes with a server: set yours on the
+extension's options page (it opens on install) and in `SCRIBE_URL` for
+scribe-desktop.
 
 ## Server
 

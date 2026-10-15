@@ -172,12 +172,12 @@ set.
 
 Set the streaming ASR **WebSocket URL** on the extension's options page
 (**settings** link in the popup, or right-click the icon → Options). It is
-persisted via `chrome.storage`. Default: `wss://scribe.lalala.casa/ws`, the
-author's server; set your own.
+persisted via `chrome.storage`. There is no default: the options page opens on
+install, and recording asks for a server until one is set.
 
 Saving a URL on another host asks Chrome for access to it (from
-`optional_host_permissions`); the default service and a local
-`ws://localhost:8000` are granted at install.
+`optional_host_permissions`); a local `ws://localhost:8000` is granted at
+install.
 
 ## Service contract
 

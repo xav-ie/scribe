@@ -162,6 +162,9 @@ async function recompute(s: JoinSession): Promise<void> {
   await setState({ segments, rawText });
 }
 
+const NO_SERVER =
+  'No scribe server is set. Enter yours in the settings page that just opened.';
+
 async function startRecording(): Promise<void> {
   const { status } = await getState();
   if (status !== 'idle') return;
@@ -175,6 +178,12 @@ async function startRecording(): Promise<void> {
     warning: undefined,
     micDevice: undefined,
   });
+  const settings = await getSettings();
+  if (!settings.wsUrl) {
+    await setState({ status: 'idle', error: NO_SERVER });
+    chrome.runtime.openOptionsPage().catch(() => {});
+    return;
+  }
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
     await setState({ status: 'idle', error: 'No active tab to capture.' });
@@ -198,8 +207,6 @@ async function startRecording(): Promise<void> {
   // Stop can land during any of the waits below; it ends the session, and
   // this start must then not go on to capture.
   const stopped = () => mem?.sessionId !== sessionId || !mem.active;
-
-  const settings = await getSettings();
 
   await ensureOffscreenDocument();
 
@@ -418,6 +425,8 @@ async function uploadEach(): Promise<void> {
   const ids = Object.keys(unsent);
   if (ids.length === 0) return;
   const { wsUrl } = await getSettings();
+  // No server yet: the sessions wait until one is set.
+  if (!wsUrl) return;
   try {
     for (const id of ids) {
       const url = new URL(`/api/sessions/${id}`, wsUrl);
@@ -630,8 +639,12 @@ async function registerMicHook(): Promise<void> {
   ]);
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(({ reason }) => {
   reconcileStaleState().catch(() => {});
+  // There's no default server: ask for one right away.
+  if (reason === chrome.runtime.OnInstalledReason.INSTALL) {
+    chrome.runtime.openOptionsPage().catch(() => {});
+  }
   registerMicHook().catch((error: unknown) => {
     console.warn('[bg] mic hook registration failed:', errorMessage(error));
   });

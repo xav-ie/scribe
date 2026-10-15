@@ -82,7 +82,7 @@ async function init(): Promise<void> {
   micToggle.checked = settings.withMic;
   debugToggle.checked = settings.debug;
   saveAudioToggle.checked = settings.saveAudio;
-  wsUrlEl.textContent = settings.wsUrl;
+  wsUrlEl.textContent = settings.wsUrl || 'not set';
   $<HTMLElement>('build').textContent = BUILD;
 
   render(await getState());

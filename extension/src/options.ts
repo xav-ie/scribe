@@ -1,4 +1,4 @@
-import { BUILD, DEFAULT_SETTINGS, getSettings, saveServerUrl } from './config';
+import { BUILD, getSettings, saveServerUrl } from './config';
 
 const $ = <T extends HTMLElement>(id: string) =>
   document.querySelector(`#${id}`) as T;
@@ -26,11 +26,6 @@ async function save(wsUrl: string): Promise<void> {
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   void save(wsUrlInput.value.trim());
-});
-
-$<HTMLButtonElement>('reset').addEventListener('click', () => {
-  wsUrlInput.value = DEFAULT_SETTINGS.wsUrl;
-  void save(DEFAULT_SETTINGS.wsUrl);
 });
 
 const settings = await getSettings();

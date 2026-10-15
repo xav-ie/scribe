@@ -47,9 +47,9 @@ export default defineManifest({
     'unlimitedStorage',
   ],
   // Streaming service endpoints: the WebSocket the offscreen doc streams PCM to,
-  // and the HTTP API the worker posts session records to. The default service
-  // and local dev are granted at install; any other server set on the options
-  // page is requested there from optional_host_permissions.
+  // and the HTTP API the worker posts session records to. Local dev is granted
+  // at install; the server set on the options page is requested there from
+  // optional_host_permissions.
   optional_host_permissions: [
     'wss://*/*',
     'https://*/*',
@@ -57,9 +57,7 @@ export default defineManifest({
     'http://*/*',
   ],
   host_permissions: [
-    'wss://scribe.lalala.casa/*', // deployed streaming ASR service
-    'https://scribe.lalala.casa/*', // its session API: records posted at stop
-    'ws://localhost:8000/*', // local dev service
+    'ws://localhost:8000/*', // local dev server
     'ws://127.0.0.1:8000/*',
     'http://localhost:8000/*',
     'http://127.0.0.1:8000/*',
