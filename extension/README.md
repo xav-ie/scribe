@@ -6,8 +6,8 @@ service** for live transcription, and labels the captions with **real speaker
 names** by reading the meeting UI's active-speaker indicator.
 
 It is deliberately a **thin client**. It captures audio, streams it, and scrapes
-who's talking — transcription itself lives in a separate, reusable streaming
-service so the capture layer stays swappable.
+who's talking. Transcription happens on the [scribe server](../server), so the
+capture layer stays swappable.
 
 > Inspired by
 > [`recallai/chrome-recording-transcription-extension`](https://github.com/recallai/chrome-recording-transcription-extension).
@@ -40,14 +40,14 @@ flowchart LR
         cs["content script<br/>(active-speaker scraper)"]
     end
 
-    subgraph svc["streaming ASR service (separate)"]
-        asr["cache-aware streaming ASR<br/>(words + timestamps)"]
+    subgraph svc["scribe server"]
+        asr["streaming ASR<br/>(words + timestamps)"]
     end
 
     pop -- "start / stop / mic / debug" --> sw
     sw -- "tab stream id" --> off
     off == "WS: int16 PCM frames" ==> asr
-    asr == "{ text, words:[{word,start,end}] }" ==> off
+    asr == "{ type: words, from, words:[{word,start,end}] }" ==> off
     off -- "words + captureStartEpoch" --> sw
     cs -- "active speaker changed" --> sw
     sw -- "join → segments" --> pop
@@ -124,7 +124,8 @@ icon, and **refresh the meeting tab** so the content script re-injects.
 ## Quality gates
 
 ```bash
-pnpm check       # runs types + lint + format + knip in parallel
+pnpm check       # runs types + lint + format + knip + unit tests in parallel
+pnpm test        # vitest in watch mode
 pnpm lint        # eslint --fix
 pnpm format      # prettier --write
 pnpm icons       # regenerate icons (needs ImageMagick `magick` on PATH)
@@ -138,7 +139,8 @@ regexp, n), Prettier (single quotes), knip.
 Two GitHub Actions workflows (`.github/workflows/`):
 
 - **Checks** — on every push to `main` and every PR, runs `check:types`,
-  `check:lint`, `check:format`, `check:knip` and a `build` in parallel.
+  `check:lint`, `check:format`, `check:knip`, `check:test` and a `build` in
+  parallel.
 - **Release** — [Changesets](https://github.com/changesets/changesets)-driven.
 
 Releases are versioned with Changesets (no manual version bumps):
@@ -170,7 +172,8 @@ set.
 
 Set the streaming ASR **WebSocket URL** on the extension's options page
 (**settings** link in the popup, or right-click the icon → Options). It is
-persisted via `chrome.storage`. Default: `wss://scribe.lalala.casa/ws`.
+persisted via `chrome.storage`. Default: `wss://scribe.lalala.casa/ws`, the
+author's server; set your own.
 
 Saving a URL on another host asks Chrome for access to it (from
 `optional_host_permissions`); the default service and a local
@@ -178,20 +181,16 @@ Saving a URL on another host asks Chrome for access to it (from
 
 ## Service contract
 
-The extension opens a WebSocket and speaks this protocol:
-
-```
-→ (text)   {"sampleRate": 48000}          // once, on open
-→ (binary) <int16 LE mono PCM frames>      // continuously, at sampleRate
-← (text)   {"type":"partial",
-            "text":"the cumulative transcript so far",
-            "words":[{"word":"the","start":0.56,"end":1.12}, ...]}
-```
-
-`words[].start/end` are seconds from the start of the audio stream; the extension
-maps them to wall-clock via the capture-start time to align with the speaker
-timeline. A compatible streaming ASR service (NVIDIA NeMo cache-aware
-FastConformer) is maintained separately.
+The extension opens one WebSocket per stream (the tab, and the mic when it's
+on) and speaks the protocol described in the
+[top-level README](../README.md#streaming-protocol): a JSON hello with the
+sample rate, session id, channel, whether to save audio and the participants'
+names to boost, then int16 PCM; the server streams back word updates that
+replace the stream's words from an index on. Word times are seconds from the
+stream's first sample, which the extension maps to wall-clock time to line them
+up with the speaker timeline. At stop it posts the session's full record to
+`/api/sessions/<sessionId>` for the server's web UI and MCP tools, retrying
+later if that fails.
 
 ## Usage
 
@@ -213,18 +212,15 @@ FastConformer) is maintained separately.
 | No mic in the recording                 | Grant via the `grant access` link (`micsetup.html`); also check OS-level mic permission for Chrome. The live toggle no-ops until granted.                                                                                                               |
 | Audio freezes/gaps mid-recording        | You switched away from the meeting tab; Chrome throttles background tabs. Stay on the tab.                                                                                                                                                              |
 | Nothing records / "offscreen not ready" | Reload the extension in `chrome://extensions`.                                                                                                                                                                                                          |
-| WebSocket won't connect                 | Add the service origin to `host_permissions` (`wss://…/*`), confirm the service is reachable, and that TLS validates.                                                                                                                                   |
+| WebSocket won't connect                 | Save the server on the options page again so Chrome asks for access to its host, confirm the server is reachable, and that TLS validates.                                                                                                               |
 
 ---
 
 ## Roadmap
 
 - **Transcript export** — copy / download the play-script (Markdown or JSON).
-- **Persist sessions** keyed by meeting/time.
 - **More platforms** — Teams/Webex adapters (the audio path is already platform-
   agnostic; only the active-speaker selectors are per-platform).
-- **Lock down `host_permissions`** to the stable `chrome-extension://<id>` origin
-  once published.
 
 ### Known reliability ceiling
 
