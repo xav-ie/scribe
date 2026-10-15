@@ -28,3 +28,7 @@ updates:
       npm:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # typescript-eslint doesn't support TypeScript 7 yet; revisit when it does.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
