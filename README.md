@@ -26,10 +26,8 @@ searchable by you and by your AI agents.
 
 ![The meeting tab feeds audio and the active speaker to the extension, which streams audio to the scribe server over a WebSocket and gets words with timestamps back; the server's sessions are available to the web UI, MCP agents and the OpenAI-compatible API](assets/how-it-works.png)
 
-The extension streams the meeting tab and your microphone to the server, which
-sends back each word with its timing. The extension lines those words up with
-the meeting's own active speaker indicator, so attribution needs no audio
-diarization and works for any number of people.
+The server sends back every word with its timing, and the extension labels it
+with whoever the meeting showed as speaking at that moment.
 
 ## Quick start
 
