@@ -24,7 +24,8 @@
     "format": "prettier --write .",
     "changeset": "changeset",
     "version": "changeset version && pnpm install --lockfile-only",
-    "test": "vitest"
+    "test": "vitest",
+    "a11y": "vite build && node scripts/a11y.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.1",
@@ -32,6 +33,7 @@
     "@eslint/js": "^10.0.1",
     "@types/chrome": "^0.0.287",
     "@types/node": "^25.6.0",
+    "axe-core": "^4.13.0",
     "concurrently": "^9.2.1",
     "eslint": "^10.3.0",
     "eslint-plugin-import-x": "^4.16.2",
@@ -42,6 +44,7 @@
     "globals": "^17.6.0",
     "knip": "^6.12.0",
     "prettier": "^3.8.3",
+    "puppeteer-core": "^25.12.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.59.2",
     "vite": "^5.4.11",

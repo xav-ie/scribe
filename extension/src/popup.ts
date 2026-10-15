@@ -19,7 +19,7 @@ const LABELS: Record<RecordingStatus, string> = {
 
 const UNKNOWN = 'Unknown';
 
-$<HTMLImageElement>('mark').src = logo;
+$<HTMLElement>('mark').style.backgroundImage = `url(${logo})`;
 const recordBtn = $<HTMLButtonElement>('record');
 const statusEl = $<HTMLSpanElement>('status');
 const micToggle = $<HTMLInputElement>('withMic');
@@ -161,11 +161,11 @@ micSetupLink.addEventListener('click', (e) => {
 });
 
 // Deterministic per-speaker colour so each person reads consistently across the
-// legend and the script.
+// legend and the script. Light enough for 4.5:1 on the popup's browns at any hue.
 function speakerColor(name: string): string {
   let hash = 0;
   for (const ch of name) hash = (hash * 31 + (ch.codePointAt(0) ?? 0)) % 360;
-  return `hsl(${hash} 75% 76%)`;
+  return `hsl(${hash} 75% 82%)`;
 }
 
 // Whether the transcript is scrolled to (near) the bottom — used to keep it

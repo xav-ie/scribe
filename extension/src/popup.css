@@ -22,19 +22,22 @@
   src: url('./fonts/maple-mono-latin-700.woff2') format('woff2');
 }
 
-/* The logo's palette: a copper brown ground and a recording red. */
+/* The logo's palette: an orange-brown ground and a recording red. Every text
+   color passes WCAG AA (4.5:1) on --bg and --surface; --rec is for graphics
+   and large shapes only (3.1:1 on --bg), and text on it uses --accent's
+   darker red instead. Checked by pnpm a11y. */
 :root {
-  --bg: #5c2f18;
-  --surface: #4a2512;
-  --border: #7a4426;
-  --fg: #f8ece3;
-  --muted: #e0c3ae;
+  --bg: #5a3410;
+  --surface: #47280b;
+  --border: #c9936b;
+  --fg: #fbefe6;
+  --muted: #ecd0b8;
   --rec: #ff4136;
-  --accent: #d92d20;
-  --link: #ffb3a1;
-  --danger: #ffb3a1;
-  --warn: #ffd08a;
-  --ok: #a6e3a1;
+  --accent: #c62818;
+  --link: #ffc4a8;
+  --danger: #ffc4a8;
+  --warn: #ffd690;
+  --ok: #b5ebb0;
   --field: var(--surface);
   --sans: 'Inter', system-ui, -apple-system, sans-serif;
   --mono: 'Maple Mono', ui-monospace, monospace;
@@ -88,7 +91,7 @@ h2 {
   color: var(--muted);
 }
 .status.recording {
-  background: var(--rec);
+  background: var(--accent);
   color: white;
 }
 .status.finalizing {
@@ -226,8 +229,8 @@ button.secondary {
   padding: 1px 8px;
   border-radius: 999px;
   color: var(--c);
-  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
-  background: color-mix(in srgb, var(--c) 14%, transparent);
+  border: 1px solid var(--c);
+  background: var(--surface);
 }
 
 /* Play-script transcript: one coloured speaker header + line per turn. */
@@ -348,9 +351,14 @@ button.hidden {
   font-size: 13px;
 }
 
+/* The logo cropped to the snail (logo units x 118 to 462, y 158 to 390): its
+   circle is the page's own color. 75 px wide is a scale of 75/344. */
 .mark {
-  width: 28px;
-  height: 28px;
+  width: 75px;
+  height: 50px;
+  background-size: 111.6px 111.6px;
+  background-position: -25.7px -34.5px;
+  background-repeat: no-repeat;
 }
 header h1 {
   flex: 1;

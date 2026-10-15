@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [check:types, check:lint, check:format, check:knip, check:test, build]
+        task: [check:types, check:lint, check:format, check:knip, check:test, build, a11y]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

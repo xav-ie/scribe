@@ -9,5 +9,6 @@
     "manifest.config.ts"
   ],
   "project": ["src/**/*.ts", "*.ts"],
-  "ignoreBinaries": ["magick"]
+  "ignoreBinaries": ["magick"],
+  "ignoreDependencies": ["axe-core"]
 }
