@@ -379,7 +379,7 @@ def _read_clip(f):
 
 @app.post("/v1/audio/transcriptions")
 async def transcriptions(file: UploadFile):
-    """OpenAI-style batch transcription (desktop dictation), boosted with the
+    """OpenAI-style batch transcription (dictation tools), boosted with the
     vocabulary. Only `file` is read; model/prompt/response_format are ignored
     and the reply is always {"text"}."""
     if file.size is not None and file.size > MAX_UPLOAD_BYTES:

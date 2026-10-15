@@ -20,8 +20,7 @@ searchable by you and by your AI agents.
 - **Ready for agents.** An MCP server lets AI agents list, read and search
   transcripts, keep notes on them, and edit the vocabulary.
 - **An OpenAI-compatible transcription API.** `POST /v1/audio/transcriptions`
-  puts the same model behind any dictation tool that speaks the OpenAI API, such
-  as [scribe-desktop](https://github.com/xav-ie/scribe-desktop) for Hyprland.
+  puts the same model behind any dictation tool that speaks the OpenAI API.
 
 ## How it works
 
