@@ -36,6 +36,8 @@ interface Channel {
   closing: boolean;
   /** The stream's full transcript, kept to resend if the background loses words. */
   words: Word[];
+  /** Called when the server has sent its last words (or the socket closed). */
+  flushed: (() => void) | null;
 }
 
 interface Session {
@@ -82,6 +84,8 @@ const mutedByTab = new Map<number, boolean>();
 const meetingMicByTab = new Map<number, string>();
 let micOpenedFor: string | undefined;
 const SILENT_MIC_SECONDS = 20;
+// How long a stopped stream waits for the server's last words.
+const FLUSH_TIMEOUT_MS = 5000;
 let captureTabId: number | null = null;
 const micMuted = (): boolean =>
   captureTabId !== null && mutedByTab.get(captureTabId) === true;
@@ -214,6 +218,7 @@ function openChannel(
     captureStartEpoch: null,
     closing: false,
     words: [],
+    flushed: null,
   };
 
   ws.addEventListener('open', () => {
@@ -238,7 +243,9 @@ function openChannel(
         from?: number;
         words?: Word[];
       };
-      if (msg.type !== 'words' || !session) return;
+      // Words keep coming after a stop, while the server decodes what it holds.
+      if (msg.type === 'done') channel.flushed?.();
+      if (msg.type !== 'words') return;
       const from = msg.from ?? 0;
       if (!applyWords(channel.words, from, msg.words ?? [])) {
         console.warn('[offscreen] word update past the end', from);
@@ -256,17 +263,18 @@ function openChannel(
         status: 'idle',
         error: `Cannot reach streaming service at ${wsUrl}`,
       });
-      teardown();
+      void teardown();
     } else {
       console.warn('[offscreen] mic stream error; dropping mic');
       removeMic();
     }
   });
   ws.addEventListener('close', () => {
+    channel.flushed?.();
     if (channel.closing) return; // deliberate (stop / mic toggled off)
     if (primary) {
       if (session) sendState({ status: 'idle' });
-      teardown();
+      void teardown();
     } else {
       removeMic();
     }
@@ -326,13 +334,23 @@ function sendWords(
     .catch(() => {});
 }
 
-function closeChannel(ch: Channel): void {
+// Stop feeding a channel and close its socket. With `flush`, first ask the
+// server for the words it still holds (the audio short of a step and its
+// lookahead) and wait for them, up to FLUSH_TIMEOUT_MS.
+async function closeChannel(ch: Channel, flush = false): Promise<void> {
   ch.closing = true;
   try {
     ch.node.disconnect();
     ch.source.disconnect();
   } catch {
     /* already gone */
+  }
+  if (flush && ch.ws.readyState === WebSocket.OPEN) {
+    await new Promise<void>((resolve) => {
+      ch.flushed = resolve;
+      setTimeout(resolve, FLUSH_TIMEOUT_MS);
+      ch.ws.send(JSON.stringify({ type: 'end' }));
+    });
   }
   if (
     ch.ws.readyState === WebSocket.OPEN ||
@@ -384,7 +402,7 @@ async function addMic(): Promise<void> {
 
 function removeMic(): void {
   if (!session?.mic) return;
-  closeChannel(session.mic);
+  void closeChannel(session.mic, true);
   for (const t of session.micStream?.getTracks() ?? []) t.stop();
   session.mic = null;
   session.micStream = null;
@@ -449,7 +467,7 @@ async function start(
     console.log(`[offscreen] streaming started (mic: ${session?.mic != null})`);
     sendState({ status: 'recording' });
   } catch (error) {
-    if (session) teardown();
+    if (session) void teardown();
     else release();
     const message = error instanceof Error ? error.message : String(error);
     console.error('[offscreen] start failed:', message);
@@ -457,16 +475,17 @@ async function start(
   }
 }
 
-function stop(): void {
+// Idle is reported once the server's last words are in, so the background
+// finishes the session with them.
+async function stop(): Promise<void> {
   generation++;
   if (!session) return;
   console.log('[offscreen] stop requested');
-  // Closing the sockets flushes the server; teardown stops the tracks/graph.
-  teardown();
+  await teardown(true);
   sendState({ status: 'idle' });
 }
 
-function teardown(): void {
+async function teardown(flush = false): Promise<void> {
   generation++; // a start still in flight must not report "recording"
   // The offscreen doc outlives recordings; the next one starts unmuted unless
   // the content script reports otherwise (it does just before each start).
@@ -476,11 +495,12 @@ function teardown(): void {
   if (!session) return;
   const s = session;
   session = null; // null first so the close handlers don't re-enter
-  closeChannel(s.tab);
-  if (s.mic) closeChannel(s.mic);
+  const closing = [closeChannel(s.tab, flush)];
+  if (s.mic) closing.push(closeChannel(s.mic, flush));
   for (const t of s.tabStream.getTracks()) t.stop();
   for (const t of s.micStream?.getTracks() ?? []) t.stop();
   s.ctx.close().catch(() => {});
+  await Promise.all(closing);
 }
 
 chrome.runtime.onMessage.addListener((message: Message, sender) => {
@@ -515,7 +535,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
       break;
     }
     case 'OFFSCREEN_STOP': {
-      stop();
+      void stop();
       break;
     }
     case 'OFFSCREEN_RESYNC': {

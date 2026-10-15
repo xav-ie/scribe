@@ -175,6 +175,8 @@ async function startRecording(): Promise<void> {
     await setState({ status: 'idle', error: 'No active tab to capture.' });
     return;
   }
+  // The last recording may still be waiting for its final words.
+  if (mem?.active) await finishSession();
 
   const sessionId = crypto.randomUUID();
   mem = {
@@ -187,6 +189,9 @@ async function startRecording(): Promise<void> {
   };
   resyncRequested = false;
   await flushSession();
+  // Stop can land during any of the waits below; it ends the session, and
+  // this start must then not go on to capture.
+  const stopped = () => mem?.sessionId !== sessionId || !mem.active;
 
   const settings = await getSettings();
 
@@ -196,6 +201,7 @@ async function startRecording(): Promise<void> {
   // streaming service boosts so they're transcribed right.
   const detecting = await startSpeakerDetection(tab.id, platformOf(tab.url));
   const boost = detecting === true ? await participantNames(tab.id) : [];
+  if (stopped()) return;
 
   // Last, right before it's used: the capture id goes stale within seconds,
   // and injecting detection into a tab that missed it can take that long.
@@ -206,7 +212,9 @@ async function startRecording(): Promise<void> {
       else resolve(id);
     });
   });
+  if (stopped()) return;
 
+  capturing = sessionId;
   chrome.runtime
     .sendMessage({
       type: 'OFFSCREEN_START',
@@ -305,6 +313,12 @@ async function startSpeakerDetection(
   return 'Speaker detection is not running on this tab, so everyone will show as Unknown and muting is not detected. Reload the meeting tab and start again.';
 }
 
+// The session the offscreen document was told to capture.
+let capturing: string | null = null;
+// After a stop, the offscreen document waits for each stream's last words and
+// then reports idle, which finishes the session; this is the backstop.
+const FINISH_TIMEOUT_MS = 10_000;
+
 async function stopRecording(): Promise<void> {
   const { status } = await getState();
   if (status !== 'recording') return;
@@ -316,7 +330,15 @@ async function stopRecording(): Promise<void> {
     } satisfies Message)
     .catch(() => {});
   await setState({ status: 'idle' });
-  await finishSession();
+  const id = mem?.sessionId;
+  if (id && capturing === id) {
+    setTimeout(() => {
+      if (mem?.sessionId === id) finishSession().catch(() => {});
+    }, FINISH_TIMEOUT_MS);
+  } else {
+    // Stopped before capture began: nothing to wait for.
+    await finishSession();
+  }
 }
 
 function platformOf(url: string | undefined): string | null {
@@ -341,16 +363,16 @@ async function finishSession(): Promise<void> {
   await flushSession();
   if (!s.sessionId) return;
   const { segments = [], rawText = '' } = await getState();
-  const stored = await chrome.storage.local.get(UNSENT_KEY);
-  const unsent = (stored[UNSENT_KEY] ?? {}) as Record<string, unknown>;
-  unsent[s.sessionId] = {
-    ...s,
-    stoppedAt: Date.now(),
-    extensionVersion: BUILD,
-    segments,
-    rawText,
-  };
-  await chrome.storage.local.set({ [UNSENT_KEY]: unsent });
+  const { sessionId } = s;
+  await updateUnsent((unsent) => {
+    unsent[sessionId] = {
+      ...s,
+      stoppedAt: Date.now(),
+      extensionVersion: BUILD,
+      segments,
+      rawText,
+    };
+  });
   await uploadUnsent();
 }
 
@@ -360,9 +382,33 @@ async function finishSession(): Promise<void> {
 const UNSENT_KEY = 'unsentSessions';
 const UPLOAD_WARNING = "Couldn't save the last session to scribe";
 
-async function uploadUnsent(): Promise<void> {
-  const stored = await chrome.storage.local.get(UNSENT_KEY);
-  const unsent = (stored[UNSENT_KEY] ?? {}) as Record<string, unknown>;
+type Unsent = Record<string, unknown>;
+
+// Every change to the queue goes through here, one at a time, on a fresh read:
+// uploads and newly finished sessions overlap, and a change made from a stale
+// copy would drop a session.
+let unsentQueue: Promise<unknown> = Promise.resolve();
+function updateUnsent(change: (unsent: Unsent) => void): Promise<Unsent> {
+  const next = unsentQueue.then(async () => {
+    const stored = await chrome.storage.local.get(UNSENT_KEY);
+    const unsent = (stored[UNSENT_KEY] ?? {}) as Unsent;
+    change(unsent);
+    await chrome.storage.local.set({ [UNSENT_KEY]: unsent });
+    return unsent;
+  });
+  unsentQueue = next.catch(() => {});
+  return next;
+}
+
+// One upload run at a time; a run asked for while one is going follows it.
+let uploading: Promise<void> = Promise.resolve();
+function uploadUnsent(): Promise<void> {
+  uploading = uploading.then(uploadEach, uploadEach);
+  return uploading;
+}
+
+async function uploadEach(): Promise<void> {
+  const unsent = await updateUnsent(() => {});
   const ids = Object.keys(unsent);
   if (ids.length === 0) return;
   const { wsUrl } = await getSettings();
@@ -377,8 +423,9 @@ async function uploadUnsent(): Promise<void> {
         body: JSON.stringify(unsent[id]),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      delete unsent[id];
-      await chrome.storage.local.set({ [UNSENT_KEY]: unsent });
+      await updateUnsent((latest) => {
+        delete latest[id];
+      });
       dlog('[bg] session uploaded:', id);
     }
     const { warning } = await getState();
@@ -430,10 +477,19 @@ async function onTranscriptUpdate(
   scheduleRecompute();
 }
 
-async function onSpeakerEvent(name: string, atEpoch: number): Promise<void> {
+async function onSpeakerEvent(
+  tabId: number | undefined,
+  name: string,
+  atEpoch: number,
+): Promise<void> {
   const s = await session();
   if (!s.active) {
     dlog('[bg] speaker dropped (not recording):', name);
+    return;
+  }
+  // Every meeting tab reports; only the captured one is this recording's.
+  if (tabId !== s.tabId) {
+    dlog('[bg] speaker dropped (another tab):', name);
     return;
   }
   // Collapse repeats: only a genuine change starts a new span.
@@ -498,7 +554,9 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
       break;
     }
     case 'SPEAKER_EVENT': {
-      onSpeakerEvent(message.name, message.atEpoch).catch(() => {});
+      onSpeakerEvent(sender.tab?.id, message.name, message.atEpoch).catch(
+        () => {},
+      );
       break;
     }
     case 'SPEAKER_DIAG': {
@@ -599,7 +657,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 expose('scribe', {
   state: () => getState(),
   session: () => session(),
-  inject: (name: string) => onSpeakerEvent(name, Date.now()),
+  inject: async (name: string) => {
+    const { tabId } = await session();
+    return onSpeakerEvent(tabId ?? undefined, name, Date.now());
+  },
   reset: () => {
     mem = { ...emptySession(), active: true };
     return flushSession();

@@ -42,6 +42,9 @@ export default defineManifest({
     'activeTab',
     'tabs',
     'scripting',
+    // Finished sessions wait in storage until the server has them; a few long
+    // meetings while it's unreachable would pass the 10 MB default quota.
+    'unlimitedStorage',
   ],
   // Streaming service endpoints: the WebSocket the offscreen doc streams PCM to,
   // and the HTTP API the worker posts session records to. The default service
@@ -76,15 +79,6 @@ export default defineManifest({
       // Zoom's web client renders the meeting inside an iframe
       // (iframe#webclient) of its app shell, so the scraper must run there too.
       all_frames: true,
-    },
-  ],
-  // Declaring the standalone pages here makes CRXJS bundle them even though they
-  // are not "normal" manifest entry points. offscreen.html is created at runtime
-  // via chrome.offscreen.createDocument().
-  web_accessible_resources: [
-    {
-      resources: ['src/offscreen.html', 'src/micsetup.html'],
-      matches: ['<all_urls>'],
     },
   ],
 });
