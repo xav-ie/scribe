@@ -2,7 +2,7 @@
 
 import json
 
-from conftest import SID, pcm, settle
+from conftest import SID, FakeState, pcm, settle
 from test_ws import apply, hello
 
 
@@ -86,3 +86,16 @@ def test_closed_comes_after_the_recording_is_complete(client, server):
         assert json.loads(w.receive_text())["type"] == "closed"
         meta = json.loads((server.RECORDINGS / SID / "tab.json").read_text())
         assert [x["word"] for x in meta["words"]] == ["w1"]
+
+
+def test_a_failed_save_still_frees_the_stream(client, server, monkeypatch):
+    def full_disk(self, words, tail):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(server.Recording, "close", full_disk)
+    with client.websocket_connect(f"/ws/watch/{SID}") as w:
+        w.receive_text()
+        with client.websocket_connect("/ws") as stream:
+            stream.send_text(hello(sessionId=SID, channel="tab", save=True))
+        assert json.loads(w.receive_text())["type"] == "closed"
+    settle(lambda: FakeState.instances[0].closed)

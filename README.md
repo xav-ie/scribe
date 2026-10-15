@@ -42,7 +42,8 @@ flowchart LR
 >
 > Two protections are built in. WebSocket connections from web pages on other
 > sites are refused (the Origin must match the Host, so a reverse proxy has to
-> pass the Host header through), and `SCRIBE_ALLOWED_HOSTS` (the NixOS option
+> pass the Host header through, e.g. nginx's `proxy_set_header Host $host`, or
+> list the public name in `SCRIBE_ALLOWED_HOSTS`), and `SCRIBE_ALLOWED_HOSTS` (the NixOS option
 > `services.scribe.allowedHosts`) refuses requests for host names other than
 > yours, which stops DNS rebinding attacks from pages your browser visits.
 

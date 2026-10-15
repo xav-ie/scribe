@@ -6,6 +6,7 @@ import json
 import pytest
 from conftest import SID, pcm
 from fastapi.testclient import TestClient
+from starlette.testclient import WebSocketDenialResponse
 from starlette.websockets import WebSocketDisconnect
 
 
@@ -21,7 +22,13 @@ def test_other_sites_cannot_open_sockets(client, path):
 
 
 @pytest.mark.parametrize(
-    "origin", [None, "http://testserver", "chrome-extension://abcdefghijklmnop"]
+    "origin",
+    [
+        None,
+        "http://testserver",
+        "https://testserver:8443",
+        "chrome-extension://abcdefghijklmnop",
+    ],
 )
 def test_same_site_extensions_and_apps_can(client, origin):
     headers = {"origin": origin} if origin else {}
@@ -50,5 +57,20 @@ def test_allowed_hosts_refuse_other_names(pinned):
         assert ok.get("/api/sessions").status_code == 200
     with TestClient(pinned.app, base_url="http://rebound.evil.example") as bad:
         assert bad.get("/api/sessions").status_code == 400
-        with pytest.raises(WebSocketDisconnect), bad.websocket_connect("/ws"):
+        rebound = {"host": "rebound.evil.example"}
+        with (
+            pytest.raises(WebSocketDenialResponse),
+            bad.websocket_connect("/ws", headers=rebound),
+        ):
             pass
+    local = {"host": "localhost:8000"}
+    with TestClient(pinned.app) as ok, ok.websocket_connect("/ws", headers=local) as ws:
+        ws.send_text(json.dumps({"sampleRate": 16000}))
+
+
+def test_a_page_on_an_allowed_host_passes_a_rewritten_host(pinned):
+    with TestClient(pinned.app, base_url="http://localhost:8000") as c:
+        # TestClient sends Host: testserver on sockets unless told otherwise.
+        page = {"origin": "https://scribe.example.com", "host": "localhost:8000"}
+        with c.websocket_connect("/ws", headers=page) as ws:
+            ws.send_text(json.dumps({"sampleRate": 16000}))

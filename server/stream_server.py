@@ -61,6 +61,7 @@ import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import nemo.collections.asr as nemo_asr
 import numpy as np
@@ -207,11 +208,15 @@ if ALLOWED_HOSTS:
 
 def _cross_site(websocket):
     """A browser page on another site opening this socket. Browsers don't apply
-    CORS to WebSockets; extensions and non-browser clients are fine."""
+    CORS to WebSockets; extensions and non-browser clients are fine. Host names
+    are compared without ports, and a page on one of SCRIBE_ALLOWED_HOSTS is
+    always same-site (a proxy may pass its own Host upstream)."""
     origin = websocket.headers.get("origin")
     if not origin or not origin.startswith(("http://", "https://")):
         return False
-    return origin.split("://", 1)[1] != websocket.headers.get("host")
+    page = urlsplit(origin).hostname
+    host = websocket.headers.get("host", "").rsplit(":", 1)[0].strip("[]")
+    return page != host and page not in ALLOWED_HOSTS
 
 
 # Serialize GPU calls — one model, one GPU. Each socket keeps its own state.
@@ -866,16 +871,19 @@ async def ws(websocket: WebSocket):
                 LIVE.pop(live[0], None)
 
         async def cleanup():
-            if recording is not None:
-                # Keep the tail shorter than one step too, so the file is complete.
-                tail = _to_16k(state.pending, src_rate)
-                await asyncio.to_thread(recording.close, state.words, tail)
-            # After the recording is complete, so a watcher reloading the
-            # session on "closed" finds its words and a final FLAC.
-            if live is not None:
-                _publish(live[0], {"type": "closed", "stream": stream_id})
-            async with _gpu_lock:
-                await asyncio.to_thread(state.close)
+            try:
+                if recording is not None:
+                    # Keep the tail shorter than one step too, so the file is complete.
+                    tail = _to_16k(state.pending, src_rate)
+                    await asyncio.to_thread(recording.close, state.words, tail)
+            finally:
+                # After the recording is complete, so a watcher reloading the
+                # session on "closed" finds its words and a final FLAC; and
+                # even when saving failed (a full disk).
+                if live is not None:
+                    _publish(live[0], {"type": "closed", "stream": stream_id})
+                async with _gpu_lock:
+                    await asyncio.to_thread(state.close)
 
         # Shielded: a cancelled handler (server shutdown) must still free the
         # stream's boost model and save its words.

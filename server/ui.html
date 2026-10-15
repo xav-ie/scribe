@@ -494,8 +494,14 @@
           }
         };
         // Dropped mid-recording (the server restarted): look again shortly.
-        ws.onclose = () => {
+        ws.onclose = (event) => {
           if (over || watching !== ws) return;
+          if (event.code === 1008) {
+            // Refused as cross-site: a proxy in front rewrites the Host header.
+            status.textContent =
+              "The server refused the live view (cross-site check). If a reverse proxy is in front, have it pass the Host header through.";
+            return;
+          }
           const here = location.hash;
           setTimeout(() => location.hash === here && route(), 2000);
         };
