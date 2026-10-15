@@ -1,0 +1,3 @@
+{
+  "ignoredFiles": ["assets/*", "assets/logo/*", "extension/public/icons/*"]
+}
