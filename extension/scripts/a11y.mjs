@@ -4,30 +4,15 @@
 // and microphone panels), and axe-core reports any WCAG 2.2 A/AA violation,
 // color contrast included. Run with: pnpm a11y   (builds first; needs Chrome or
 // Chromium, found on PATH or through CHROME_PATH)
-import { existsSync, readFileSync } from 'node:fs';
-import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { launch } from 'puppeteer-core';
+import { findChrome, servePreview } from './preview.mjs';
 
-const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const dist = path.join(root, 'dist');
 const axe = readFileSync(
   createRequire(import.meta.url).resolve('axe-core/axe.min.js'),
   'utf8',
 );
-
-function findChrome() {
-  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
-  const names = ['chromium', 'google-chrome', 'google-chrome-stable', 'chrome'];
-  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
-    for (const name of names) {
-      if (existsSync(path.join(dir, name))) return path.join(dir, name);
-    }
-  }
-  throw new Error('No Chrome or Chromium found; set CHROME_PATH.');
-}
 
 const segments = [
   { speaker: 'Ada Lovelace', start: 0, end: 3, text: 'Shall we start?', at: 0 },
@@ -64,54 +49,8 @@ const states = [
   },
 ];
 
-function stub({ wsUrl = 'wss://scribe.example.com/ws', rec, access = true }) {
-  const recState = { updatedAt: 1, ...rec };
-  return `<script>
-window.chrome = {
-  runtime: {
-    getManifest: () => ({ version: '0.0.0', version_name: '0.0.0 a11y' }),
-    sendMessage: async () => {},
-    openOptionsPage: async () => {},
-    getURL: (p) => p,
-  },
-  storage: {
-    sync: { get: async (d) => ({ ...d, wsUrl: ${JSON.stringify(wsUrl)} }), set: async () => {} },
-    local: { get: async () => ({ recState: ${JSON.stringify(recState)} }) },
-    onChanged: { addListener() {} },
-  },
-  permissions: { contains: async () => ${access}, request: async () => true },
-  tabs: { create() {} },
-};
-</script>`;
-}
-
 let current = states[0];
-const server = createServer((req, res) => {
-  const url = new URL(req.url ?? '/', 'http://localhost');
-  const file = path.join(dist, path.normalize(url.pathname));
-  if (!file.startsWith(dist)) {
-    res.writeHead(403).end();
-    return;
-  }
-  try {
-    let body = readFileSync(file);
-    const type = {
-      '.html': 'text/html',
-      '.js': 'text/javascript',
-      '.css': 'text/css',
-      '.svg': 'image/svg+xml',
-      '.woff2': 'font/woff2',
-    }[path.extname(file)];
-    if (type === 'text/html') {
-      body = body.toString().replace('<head>', `<head>${stub(current)}`);
-    }
-    res.writeHead(200, type ? { 'Content-Type': type } : {}).end(body);
-  } catch {
-    res.writeHead(404).end();
-  }
-});
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-const { port } = server.address();
+const preview = await servePreview(() => current);
 
 const browser = await launch({
   executablePath: findChrome(),
@@ -126,7 +65,7 @@ try {
       width: state.page === 'popup' ? 348 : 640,
       height: 700,
     });
-    await page.goto(`http://127.0.0.1:${port}/src/${state.page}.html`, {
+    await page.goto(`${preview.url}/src/${state.page}.html`, {
       waitUntil: 'networkidle0',
     });
     await page.evaluate((selectors) => {
@@ -161,7 +100,7 @@ try {
   }
 } finally {
   await browser.close();
-  server.close();
+  preview.close();
 }
 if (failures > 0) {
   console.error(`${failures} accessibility violation(s)`);

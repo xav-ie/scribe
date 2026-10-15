@@ -25,7 +25,8 @@
     "changeset": "changeset",
     "version": "changeset version && pnpm install --lockfile-only",
     "test": "vitest",
-    "a11y": "vite build && node scripts/a11y.mjs"
+    "a11y": "vite build && node scripts/a11y.mjs",
+    "screenshot": "vite build && node scripts/screenshot.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.1",

@@ -8,16 +8,7 @@ captions as people talk, labels who said what, and keeps every meeting
 searchable by AI agents over MCP. The same server also powers push-to-talk
 dictation on the desktop.
 
-## Architecture
-
-```mermaid
-flowchart LR
-  ext["extension/<br/>Chrome MV3"] -- "PCM over WebSocket" --> srv["server/<br/>Parakeet streaming ASR"]
-  dic["scribe-desktop/<br/>desktop dictation"] -- "PCM over WebSocket" --> srv
-  srv -- "words + timestamps" --> ext
-  srv -- "words" --> dic
-  agents["AI agents"] -- "MCP" --> srv
-```
+![The extension's popup over a Google Meet call, showing the live transcript with each line labeled by speaker](assets/screenshot.png)
 
 | Part                                | What it does                                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
