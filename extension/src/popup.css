@@ -22,13 +22,13 @@
   src: url('./fonts/maple-mono-latin-700.woff2') format('woff2');
 }
 
-/* The logo's palette: an orange-brown ground and a recording red. Every text
-   color passes WCAG AA (4.5:1) on --bg and --surface; --rec is for graphics
-   and large shapes only (3.1:1 on --bg), and text on it uses --accent's
+/* The logo's palette: a dark orange-brown ground and a recording red. Every
+   text color passes WCAG AA (4.5:1) on --bg and --surface; --rec is for
+   graphics and outlines (4.5:1 on --bg), and white text sits on --accent's
    darker red instead. Checked by pnpm a11y. */
 :root {
-  --bg: #5a3410;
-  --surface: #47280b;
+  --bg: #33200d;
+  --surface: #241608;
   --border: #c9936b;
   --fg: #fbefe6;
   --muted: #ecd0b8;
@@ -352,14 +352,16 @@ button.hidden {
 }
 
 /* The logo cropped to the snail (logo units x 118 to 462, y 158 to 390): its
-   circle is the page's own color. 75 px wide is a scale of 75/344. */
+   circle is the page's own color. 66 px wide is a scale of 66/344. */
 .mark {
-  width: 75px;
-  height: 50px;
-  background-size: 111.6px 111.6px;
-  background-position: -25.7px -34.5px;
+  flex: none;
+  width: 66px;
+  height: 44px;
+  background-size: 98.2px 98.2px;
+  background-position: -22.6px -30.3px;
   background-repeat: no-repeat;
 }
 header h1 {
   flex: 1;
+  white-space: nowrap;
 }
