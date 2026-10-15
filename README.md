@@ -2,45 +2,71 @@
 
 # scribe
 
-Live meeting transcription on your own GPU. A browser extension streams a
-meeting's audio to a self-hosted speech recognition server, which sends back
-captions as people talk, labels who said what, and keeps every meeting
-searchable by AI agents over MCP. The same server also powers live dictation
-on the desktop with [scribe-desktop](https://github.com/xav-ie/scribe-desktop).
+**Live meeting transcription on your own GPU, with every speaker named.** A
+Chrome extension streams your Google Meet or Zoom call to a self-hosted
+recognition server and shows captions as people talk. Every meeting is kept,
+searchable by you and by your AI agents.
 
 ![The extension's popup over a Google Meet call, showing the live transcript with each line labeled by speaker](assets/screenshot.png)
 
-| Part                      | What it does                                                                                                                                                                                                                                                                                                                                                                                       |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`server/`](server)       | FastAPI service running NVIDIA's `parakeet-unified-en-0.6b` (NeMo) with buffered streaming on CUDA. Takes 16 kHz PCM on `/ws` and streams back words with timestamps. Also serves an OpenAI-style `/v1/audio/transcriptions` endpoint, a web UI for saved sessions, and an MCP server (`/mcp`) to list, read, and search meeting transcripts and manage a vocabulary that boosts names and jargon. |
-| [`extension/`](extension) | Chrome extension that captures a meeting tab's audio (Zoom, Google Meet) plus your own mic as a separate stream, and attributes each word to a speaker by joining word timestamps against the meeting's active-speaker indicator. Each meeting's participant names are boosted for its stream. See [`extension/README.md`](extension/README.md).                                                   |
+- **Real names, not "Speaker 2".** Each word is labeled with whoever the meeting
+  showed as speaking, and your own mic is labeled as you.
+- **Private and fast.** NVIDIA Parakeet streaming recognition on your GPU;
+  audio never leaves your network, and captions arrive within about a second.
+- **Names and jargon spelled right.** A vocabulary you keep, plus each
+  meeting's participant names, is boosted during recognition.
+- **Every meeting kept.** Replay audio next to its transcript, or follow a
+  recording live, in the server's web UI.
+- **Ready for agents.** An MCP server lets AI agents list, read and search
+  transcripts, keep notes on them, and edit the vocabulary.
+- **An OpenAI-compatible transcription API.** `POST /v1/audio/transcriptions`
+  puts the same model behind any dictation tool that speaks the OpenAI API, such
+  as [scribe-desktop](https://github.com/xav-ie/scribe-desktop) for Hyprland.
 
-## Requirements
+## How it works
 
-- The server: a Linux host with an NVIDIA GPU and the NVIDIA container toolkit.
-  It refuses to start without CUDA. The model is downloaded from Hugging Face
-  on first start.
-- The extension: Chrome (or another Chromium) on any OS.
+![The meeting tab feeds audio and the active speaker to the extension, which streams audio to the scribe server over a WebSocket and gets words with timestamps back; the server's sessions are available to the web UI, MCP agents and the OpenAI-compatible API](assets/how-it-works.png)
+
+The extension streams the meeting tab and your microphone to the server, which
+sends back each word with its timing. The extension lines those words up with
+the meeting's own active speaker indicator, so attribution needs no audio
+diarization and works for any number of people.
+
+## Quick start
+
+You need a Linux machine with an NVIDIA GPU and the NVIDIA container toolkit
+for the server, and Chrome or another Chromium browser for the extension.
+
+1. **Run the server.** The model downloads on first start.
+
+   ```sh
+   podman build -t scribe server
+   podman run --device nvidia.com/gpu=all -p 127.0.0.1:8000:8000 -v scribe:/cache \
+     -e HF_HOME=/cache/huggingface -e NEMO_CACHE_DIR=/cache/nemo scribe
+   ```
+
+   (`docker run --gpus all ...` works the same; on NixOS, see below.)
+
+2. **Install the extension.** Build it, then in `chrome://extensions` turn on
+   Developer mode, click **Load unpacked** and pick `extension/dist`.
+
+   ```sh
+   cd extension && pnpm install && pnpm build
+   ```
+
+   Its settings page opens: enter your server, e.g. `ws://localhost:8000/ws`.
+
+3. **Record.** Join a Meet or Zoom call in Chrome, open the extension and click
+   **Start recording**. Browse saved meetings at `http://localhost:8000`.
 
 > [!WARNING]
-> The server has **no authentication**. Anyone who can reach it can stream
-> audio, read every saved transcript and recording, and edit the vocabulary.
-> Keep it on a private network (a VPN, a tailnet) or behind a reverse proxy
-> that authenticates.
->
-> Two protections are built in. WebSocket connections from web pages on other
-> sites are refused (the Origin must match the Host, so a reverse proxy has to
-> pass the Host header through, e.g. nginx's `proxy_set_header Host $host`, or
-> list the public name in `SCRIBE_ALLOWED_HOSTS`), and `SCRIBE_ALLOWED_HOSTS` (the NixOS option
-> `services.scribe.allowedHosts`) refuses requests for host names other than
-> yours, which stops DNS rebinding attacks from pages your browser visits.
+> The server has **no authentication**: anyone who can reach it can stream
+> audio and read every transcript. Keep it on a private network or behind an
+> authenticating proxy, and set `SCRIBE_ALLOWED_HOSTS` to the host names you
+> serve it under.
 
-The extension doesn't come with a server: set yours on its options page, which
-opens on install.
-
-## Server
-
-### NixOS
+<details>
+<summary><b>NixOS module</b></summary>
 
 ```nix
 {
@@ -64,23 +90,14 @@ opens on install.
 }
 ```
 
-The module builds the server image on the host (`build-scribe-image.service`)
-so the multi-GB CUDA Python environment stays out of the Nix store, and runs it
-with `podman` and the NVIDIA container toolkit.
+The module builds the image on the host (`build-scribe-image.service`), so the
+multi-GB CUDA environment stays out of the Nix store, and runs it with podman
+and the NVIDIA container toolkit.
 
-### Without Nix
+</details>
 
-```sh
-podman build -t scribe server
-podman run --device nvidia.com/gpu=all -p 127.0.0.1:8000:8000 \
-  -v scribe-cache:/cache -e HF_HOME=/cache/huggingface -e NEMO_CACHE_DIR=/cache/nemo scribe
-```
-
-(`docker run --gpus all ...` works the same.) Tunables such as the context
-sizes and boosting strength are environment variables documented at the top of
-[`server/stream_server.py`](server/stream_server.py).
-
-### What it serves
+<details>
+<summary><b>Server reference</b>: routes, streaming protocol, configuration</summary>
 
 | Route                           |                                                                                                                                                                |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -128,6 +145,17 @@ resends the rest. Times are seconds from the stream's first sample. Send
 `{"type": "end"}` to flush the audio still buffered; the server replies with the
 final update and `{"type": "done"}`.
 
+### Configuration
+
+Environment variables, documented at the top of
+[`server/stream_server.py`](server/stream_server.py): the model, context sizes,
+boosting strength, where recordings and the vocabulary live, and
+`SCRIBE_ALLOWED_HOSTS`. Browser pages on other sites can't open the server's
+WebSockets (their Origin must match the Host, so a reverse proxy should pass
+the Host header through, e.g. nginx's `proxy_set_header Host $host`).
+
+</details>
+
 ## Development
 
 ```sh
@@ -135,7 +163,7 @@ nix develop                  # python + pytest, ruff, nixfmt, node, pnpm
 nix flake check              # ruff, nixfmt, server tests, module eval
 pytest server/tests          # the server's tests on their own (no GPU: the ML stack is stubbed)
 cd extension && pnpm i && pnpm check && pnpm build
-
+pnpm screenshot               # regenerate the README images
 ```
 
 The server tests cover the HTTP and WebSocket protocol, saving, watchers,

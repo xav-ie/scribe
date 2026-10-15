@@ -78,8 +78,10 @@ export async function servePreview(state, pages = {}) {
       res.writeHead(200, { 'Content-Type': 'text/html' }).end(pages[pathname]);
       return;
     }
-    const file = path.join(dist, path.normalize(pathname));
-    if (!file.startsWith(dist) || !existsSync(file)) {
+    // The bundled fonts, for extra pages that want them (/fonts/<file>).
+    const base = pathname.startsWith('/fonts/') ? path.join(root, 'src') : dist;
+    const file = path.join(base, path.normalize(pathname));
+    if (!file.startsWith(base) || !existsSync(file)) {
       res.writeHead(404).end();
       return;
     }
