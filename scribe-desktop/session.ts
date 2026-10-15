@@ -302,8 +302,13 @@ export function press() {
   mode = "pending";
   setPhase("pending");
   show();
-  record();
-  connect();
+  try {
+    record();
+    connect();
+  } catch (e) {
+    fail("could not start recording", e);
+    return;
+  }
   holdTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, HOLD_MS, () => {
     holdTimer = 0;
     if (mode === "pending") {
