@@ -34,6 +34,8 @@ interface StopRecording {
 interface StateUpdate {
   type: 'STATE_UPDATE';
   target: 'background';
+  /** The recording this is about; patches for any other are ignored. */
+  sessionId: string;
   patch: Partial<RecState>;
 }
 

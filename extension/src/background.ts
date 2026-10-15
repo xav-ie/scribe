@@ -11,7 +11,12 @@
 import { BUILD, getSettings } from './config';
 import { dlog, expose, setDebug } from './debug';
 import type { SpeakerDiagnostics } from './speaker/types';
-import { getState, JOIN_SESSION_KEY as SESSION_KEY, setState } from './state';
+import {
+  getState,
+  JOIN_SESSION_KEY as SESSION_KEY,
+  setState,
+  type RecState,
+} from './state';
 import {
   applyWords,
   mergeTranscript,
@@ -176,7 +181,8 @@ async function startRecording(): Promise<void> {
     return;
   }
   // The last recording may still be waiting for its final words.
-  if (mem?.active) await finishSession();
+  const previous = await session();
+  if (previous.active) await finishSession();
 
   const sessionId = crypto.randomUUID();
   mem = {
@@ -508,6 +514,22 @@ async function onSpeakerEvent(
   scheduleRecompute();
 }
 
+// The offscreen document reporting on a recording: started, failed, or done
+// (its last words in). A late report about an earlier recording is dropped.
+async function onStateUpdate(
+  sessionId: string,
+  patch: Partial<RecState>,
+): Promise<void> {
+  const s = await session();
+  if (sessionId !== s.sessionId) {
+    dlog('[bg] state dropped (earlier recording):', sessionId, patch);
+    return;
+  }
+  if (patch.status !== undefined) clearTimeout(startTimer);
+  await setState(patch);
+  if (patch.status === 'idle') await finishSession();
+}
+
 async function onSpeakerDiag(
   tabId: number | undefined,
   platform: string,
@@ -525,9 +547,12 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
   if (message.target !== 'background') return;
   switch (message.type) {
     case 'START_RECORDING': {
-      startRecording().catch((error) =>
-        setState({ status: 'idle', error: errorMessage(error) }),
-      );
+      startRecording().catch(async (error) => {
+        // Nothing was captured: drop the session rather than upload it later.
+        if (mem) mem.active = false;
+        await flushSession();
+        await setState({ status: 'idle', error: errorMessage(error) });
+      });
       break;
     }
     case 'STOP_RECORDING': {
@@ -539,9 +564,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
       break;
     }
     case 'STATE_UPDATE': {
-      if (message.patch.status !== undefined) clearTimeout(startTimer);
-      setState(message.patch).catch(() => {});
-      if (message.patch.status === 'idle') finishSession().catch(() => {});
+      onStateUpdate(message.sessionId, message.patch).catch(() => {});
       break;
     }
     case 'TRANSCRIPT_UPDATE': {

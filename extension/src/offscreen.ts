@@ -90,11 +90,14 @@ let captureTabId: number | null = null;
 const micMuted = (): boolean =>
   captureTabId !== null && mutedByTab.get(captureTabId) === true;
 
-function sendState(patch: Partial<RecState>): void {
+// Tagged with the recording it's about: a stop's idle can land after the next
+// recording has started, and must not end that one.
+function sendState(sessionId: string, patch: Partial<RecState>): void {
   chrome.runtime
     .sendMessage({
       type: 'STATE_UPDATE',
       target: 'background',
+      sessionId,
       patch,
     } satisfies Message)
     .catch(() => {});
@@ -259,7 +262,7 @@ function openChannel(
 
   ws.addEventListener('error', () => {
     if (primary) {
-      sendState({
+      sendState(stream.sessionId, {
         status: 'idle',
         error: `Cannot reach streaming service at ${wsUrl}`,
       });
@@ -273,7 +276,7 @@ function openChannel(
     channel.flushed?.();
     if (channel.closing) return; // deliberate (stop / mic toggled off)
     if (primary) {
-      if (session) sendState({ status: 'idle' });
+      if (session) sendState(stream.sessionId, { status: 'idle' });
       void teardown();
     } else {
       removeMic();
@@ -305,7 +308,7 @@ function openChannel(
         warnedSilent = true;
         const device = session.micStream?.getAudioTracks()[0]?.label;
         const which = device ? ` (${device})` : '';
-        sendState({
+        sendState(stream.sessionId, {
           warning: `Your microphone${which} is sending pure silence, so your voice isn't being transcribed. Check the input device in your system settings, then restart the recording.`,
         });
       }
@@ -379,7 +382,7 @@ async function addMic(): Promise<void> {
   micOpenedFor = label;
   const track = micStream.getAudioTracks()[0];
   const settings = track?.getSettings() ?? {};
-  sendState({
+  sendState(session.stream.sessionId, {
     micDevice: `${track?.label || 'unknown device'} (${JSON.stringify({
       deviceId: settings.deviceId,
       groupId: settings.groupId,
@@ -465,13 +468,13 @@ async function start(
     if (gen !== generation) return;
 
     console.log(`[offscreen] streaming started (mic: ${session?.mic != null})`);
-    sendState({ status: 'recording' });
+    sendState(opts.sessionId, { status: 'recording' });
   } catch (error) {
     if (session) void teardown();
     else release();
     const message = error instanceof Error ? error.message : String(error);
     console.error('[offscreen] start failed:', message);
-    sendState({ status: 'idle', error: message });
+    sendState(opts.sessionId, { status: 'idle', error: message });
   }
 }
 
@@ -481,8 +484,9 @@ async function stop(): Promise<void> {
   generation++;
   if (!session) return;
   console.log('[offscreen] stop requested');
+  const { sessionId } = session.stream;
   await teardown(true);
-  sendState({ status: 'idle' });
+  sendState(sessionId, { status: 'idle' });
 }
 
 async function teardown(flush = false): Promise<void> {
