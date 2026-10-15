@@ -79,7 +79,7 @@ tuning (see below).
 - **`src/options.{html,ts}`** — the settings page: server URL and its host permission
 - **`src/popup.{html,ts,css}`** — start/stop, toggles, and the live play-script
   transcript (speaker legend + colour-coded turns).
-- **`src/micsetup.{html,ts}`** — one-time microphone permission grant (the
+- The settings page also holds the one-time microphone permission grant (the
   offscreen doc can't show a prompt).
 
 ### Active-speaker detection (the brittle part)
@@ -210,7 +210,7 @@ later if that fails.
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Everyone shows as **`Unknown`**         | The active-speaker scraper isn't firing. Reload the extension **and refresh the meeting tab**; with Debug on, check the meeting tab console. If Meet rotated its DOM, the `[data-participant-id]`/name selectors in `speaker/meet.ts` may need a tweak. |
 | Can't hear the meeting while recording  | Tab capture mutes the tab; the offscreen doc reconnects `tabSource → ctx.destination` to keep playback. If broken, that's the line to check.                                                                                                            |
-| No mic in the recording                 | Grant via the `grant access` link (`micsetup.html`); also check OS-level mic permission for Chrome. The live toggle no-ops until granted.                                                                                                               |
+| No mic in the recording                 | Allow it under Microphone on the settings page (the popup's `grant access` link opens it); also check OS-level mic permission for Chrome. The live toggle no-ops until granted.                                                                         |
 | Audio freezes/gaps mid-recording        | You switched away from the meeting tab; Chrome throttles background tabs. Stay on the tab.                                                                                                                                                              |
 | Nothing records / "offscreen not ready" | Reload the extension in `chrome://extensions`.                                                                                                                                                                                                          |
 | WebSocket won't connect                 | Save the server on the options page again so Chrome asks for access to its host, confirm the server is reachable, and that TLS validates.                                                                                                               |

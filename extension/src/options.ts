@@ -74,6 +74,60 @@ $<HTMLButtonElement>('cancel').addEventListener('click', () => {
   show(errorEl, 'Not saved: the extension needs access to reach the server.');
 });
 
+// Microphone permission, granted from this page (an extension page can show
+// the prompt; the offscreen document that records can't) and then shared by
+// every page of the extension.
+const grantMicBtn = $<HTMLButtonElement>('grantMic');
+const micStateEl = $<HTMLElement>('micState');
+
+const MIC_TEXT: Record<PermissionState | 'unknown', string> = {
+  granted: 'Allowed. You can turn on Capture my microphone in the popup.',
+  denied:
+    "Blocked. Allow it for this extension in Chrome's microphone settings (chrome://settings/content/microphone), and check that your system lets Chrome use the microphone.",
+  prompt: 'Not allowed yet.',
+  unknown: 'Not allowed yet.',
+};
+
+function showMic(state: PermissionState | 'unknown', detail = ''): void {
+  grantMicBtn.classList.toggle('hidden', state === 'granted');
+  micStateEl.className = `mic-state ${state}`;
+  micStateEl.textContent = detail
+    ? `${MIC_TEXT[state]} ${detail}`
+    : MIC_TEXT[state];
+}
+
+async function trackMic(): Promise<void> {
+  try {
+    const status = await navigator.permissions.query({
+      name: 'microphone' as PermissionName,
+    });
+    showMic(status.state);
+    status.addEventListener('change', () => showMic(status.state));
+  } catch {
+    showMic('unknown');
+  }
+}
+
+async function grantMic(): Promise<void> {
+  grantMicBtn.disabled = true;
+  micStateEl.textContent = 'Waiting for Chrome’s prompt…';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const label = stream.getAudioTracks()[0]?.label ?? '';
+    // Only the permission was needed: release the device right away.
+    for (const track of stream.getTracks()) track.stop();
+    showMic('granted', label ? `Device: ${label}.` : '');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    showMic('denied', `(${message})`);
+  } finally {
+    grantMicBtn.disabled = false;
+  }
+}
+
+grantMicBtn.addEventListener('click', () => void grantMic());
+await trackMic();
+
 const settings = await getSettings();
 wsUrlInput.value = settings.wsUrl;
 $<HTMLElement>('build').textContent = BUILD;

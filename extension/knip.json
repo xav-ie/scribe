@@ -5,7 +5,6 @@
     "src/offscreen.ts",
     "src/popup.ts",
     "src/options.ts",
-    "src/micsetup.ts",
     "src/speaker/index.ts",
     "manifest.config.ts"
   ],

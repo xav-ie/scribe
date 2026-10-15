@@ -133,7 +133,7 @@ async function captureTabStream(streamId: string): Promise<MediaStream> {
   }
 }
 
-// Mic permission must already be granted via the micsetup page; the offscreen
+// Mic permission must already be granted on the settings page; the offscreen
 // doc can't prompt. Returns null (and warns) if it isn't granted. Echo
 // cancellation keeps meeting audio from the speakers out of the mic stream,
 // which would otherwise transcribe remote speech a second time as "Me".

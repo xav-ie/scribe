@@ -152,9 +152,10 @@ async function exportDebugBundle(): Promise<void> {
 
 exportBtn.addEventListener('click', () => void exportDebugBundle());
 
+// The grant lives on the settings page.
 micSetupLink.addEventListener('click', (e) => {
   e.preventDefault();
-  chrome.tabs.create({ url: chrome.runtime.getURL('src/micsetup.html') });
+  chrome.runtime.openOptionsPage().catch(() => {});
 });
 
 // Deterministic per-speaker colour so each person reads consistently across the

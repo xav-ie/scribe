@@ -259,6 +259,38 @@ body.options-page {
 .access.hidden {
   display: none;
 }
+.panel {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #2c303a;
+}
+.panel h2 {
+  font-size: 14px;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--fg);
+}
+.panel p {
+  line-height: 1.45;
+  margin: 0 0 10px;
+}
+.panel .actions button {
+  width: auto;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+button.hidden {
+  display: none;
+}
+.mic-state {
+  color: var(--muted);
+}
+.mic-state.granted {
+  color: var(--ok);
+}
+.mic-state.denied {
+  color: var(--danger);
+}
 .access h2 {
   margin: 0 0 6px;
   font-size: 14px;

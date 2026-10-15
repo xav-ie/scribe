@@ -50,6 +50,24 @@
     <div id="error" class="error hidden"></div>
     <div id="saved" class="warning hidden"></div>
 
+    <section id="microphone" class="panel">
+      <h2>Microphone</h2>
+      <p>
+        With <strong>Capture my microphone</strong> on in the popup, your own
+        voice is recorded as a separate stream and labeled as you, even while
+        others are talking. Chrome asks for permission once, here: the recording
+        itself runs in a background page that can't ask. The microphone is open
+        only while recording, and while you're muted in the meeting it sends
+        silence instead.
+      </p>
+      <div class="actions">
+        <button type="button" id="grantMic" class="primary">
+          Allow microphone
+        </button>
+      </div>
+      <p id="micState" class="mic-state"></p>
+    </section>
+
     <footer id="build" class="build"></footer>
 
     <script type="module" src="./options.ts"></script>
