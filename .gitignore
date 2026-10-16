@@ -3,3 +3,5 @@ result-*
 __pycache__/
 *.pyc
 .venv/
+# the access token from the README quick start
+scribe-token

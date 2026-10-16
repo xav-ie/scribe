@@ -24,7 +24,8 @@ searchable by you and by your AI agents.
 - **Ready for agents.** An MCP server lets AI agents list, read and search
   transcripts, keep notes on them, and edit the vocabulary.
 - **An OpenAI-compatible transcription API.** `POST /v1/audio/transcriptions`
-  puts the same model behind any dictation tool that speaks the OpenAI API.
+  puts the same model behind any dictation tool that speaks the OpenAI API,
+  with the token as its API key.
 
 ## How it works
 
@@ -52,10 +53,14 @@ You need a Linux machine with an NVIDIA GPU (about 2.6 GB of GPU memory and
 10 GB of disk) with the NVIDIA container toolkit, and Chrome or another
 Chromium browser.
 
-1. **Run the server.** The model downloads on first start.
+1. **Run the server.** It reads its access token from a file; the model
+   downloads on first start.
 
    ```sh
-   docker run -d --gpus all -p 127.0.0.1:8000:8000 -v scribe:/cache ghcr.io/xav-ie/scribe
+   openssl rand -hex 32 > scribe-token
+   docker run -d --gpus all -p 127.0.0.1:8000:8000 -v scribe:/cache \
+     -v "$PWD/scribe-token:/run/secrets/scribe-token:ro" \
+     -e SCRIBE_TOKEN_FILE=/run/secrets/scribe-token ghcr.io/xav-ie/scribe
    ```
 
    Or `docker compose up -d` with this repository's [`compose.yaml`](compose.yaml).
@@ -64,8 +69,9 @@ Chromium browser.
 2. **Install the extension.** Download `meeting-capture-extension-*.zip` from
    the [latest release](https://github.com/xav-ie/scribe/releases/latest) and
    unzip it. In `chrome://extensions`, turn on Developer mode, click
-   **Load unpacked** and pick the unzipped folder. On the settings page that
-   opens, enter `ws://localhost:8000/ws`.
+   **Load unpacked** and pick the unzipped folder. Then open
+   `http://localhost:8000`, log in with the token, click **pair extension**, and
+   paste that URL into the extension's settings page, which opens on install.
 
 3. **Record.** Join a Meet or Zoom call in Chrome, open the extension and click
    **Start recording**.
@@ -73,11 +79,12 @@ Chromium browser.
 Recording laws differ by place, and some require everyone's consent: check
 yours, and tell people when you're recording them.
 
-> [!WARNING]
-> The server has **no authentication**: anyone who can reach it can stream
-> audio and read every transcript. Keep it on a private network or behind an
-> authenticating proxy, and set `SCRIBE_ALLOWED_HOSTS` to the host names you
-> serve it under.
+> [!IMPORTANT]
+> Without a token (`SCRIBE_TOKEN_FILE`, or `SCRIBE_TOKEN` as an escape hatch)
+> the server is open to anyone who can reach it, and the web UI and extension
+> say so. Serve it over HTTPS when it leaves your machine, so the token isn't
+> sent in the clear, and set `SCRIBE_ALLOWED_HOSTS` to the names you serve it
+> under.
 
 ## After the meeting
 
@@ -90,7 +97,8 @@ while it happens.
 Your AI agents can read them too. Add the server's MCP endpoint to Claude Code:
 
 ```sh
-claude mcp add --transport http scribe http://localhost:8000/mcp
+claude mcp add --transport http scribe http://localhost:8000/mcp \
+  --header "Authorization: Bearer $(cat scribe-token)"
 ```
 
 Then ask things like _"What did we decide about the old endpoint in this
@@ -115,6 +123,8 @@ meeting gets them right.
           # services.scribe.dataDir = "/var/lib/scribe"; # model cache, recordings, vocabulary
           # Refuse requests for other host names (DNS rebinding); empty allows any.
           services.scribe.allowedHosts = [ "scribe.example.com" "localhost" ];
+          # The access token, from agenix, sops-nix or any file outside the store.
+          services.scribe.tokenFile = "/run/agenix/scribe-token";
           # The container listens on 8000; publishing it is up to you.
           virtualisation.oci-containers.containers.scribe.ports = [ "127.0.0.1:8000:8000" ];
         }
@@ -143,14 +153,19 @@ cd extension && pnpm install && pnpm build   # then load extension/dist
 <details>
 <summary><b>Server reference</b>: routes, streaming protocol, configuration</summary>
 
-| Route                           |                                                                                                                                                                |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /`                         | Web UI: saved sessions with audio playback, live view of a recording in progress, the vocabulary editor.                                                       |
-| `WS /ws`                        | Streaming recognition (protocol below).                                                                                                                        |
-| `WS /ws/watch/<sessionId>`      | Follow a session's streams live, as the web UI does.                                                                                                           |
-| `POST /v1/audio/transcriptions` | OpenAI-style batch transcription of an uploaded clip; replies `{"text"}`.                                                                                      |
-| `/api/sessions`, `/api/vocab`   | The JSON API behind the web UI.                                                                                                                                |
-| `/mcp`                          | MCP server (streamable HTTP): `list_meetings`, `get_transcript`, `search_transcripts`, cleanups (notes an agent made from a transcript), and vocabulary tools. |
+| Route                                     |                                                                                                                                                                |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /`                                   | Web UI: saved sessions with audio playback, live view of a recording in progress, the vocabulary editor.                                                       |
+| `WS /ws`                                  | Streaming recognition (protocol below).                                                                                                                        |
+| `WS /ws/watch/<sessionId>`                | Follow a session's streams live, as the web UI does.                                                                                                           |
+| `POST /v1/audio/transcriptions`           | OpenAI-style batch transcription of an uploaded clip; replies `{"text"}`.                                                                                      |
+| `/api/sessions`, `/api/vocab`             | The JSON API behind the web UI.                                                                                                                                |
+| `/mcp`                                    | MCP server (streamable HTTP): `list_meetings`, `get_transcript`, `search_transcripts`, cleanups (notes an agent made from a transcript), and vocabulary tools. |
+| `/api/info`, `/api/login`, `/api/pairing` | Whether a token is required, the web UI's login, and the extension's pairing URL.                                                                              |
+
+With a token set, every route except `/`, `/health`, `/api/info` and the login
+takes `Authorization: Bearer <token>` (or the web UI's login cookie), and `/ws`
+also accepts it as `"token"` in its first message.
 
 ### Streaming protocol
 
@@ -162,7 +177,8 @@ A client opens `/ws` and sends one JSON text message first:
   "sessionId": "<uuid>",
   "channel": "tab",
   "save": false,
-  "boost": ["Ada Lovelace"]
+  "boost": ["Ada Lovelace"],
+  "token": "<access token>"
 }
 ```
 
