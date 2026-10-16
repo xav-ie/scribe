@@ -29,7 +29,7 @@
     "@crxjs/vite-plugin": "^3.0.0",
     "@eslint/js": "^10.0.1",
     "@types/chrome": "^0.3.4",
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.4",
     "axe-core": "^4.13.0",
     "concurrently": "^10.0.5",
     "eslint": "^10.11.0",
