@@ -139,8 +139,9 @@ regexp, n), Prettier (single quotes), knip.
 CI and releases live at the repository root (`.github/workflows/`): every push
 and PR runs the extension's types, lint, format, knip, unit tests, build and
 accessibility check. Releases use [knope](https://knope.tech): add a change
-note with `knope document-change` (in `nix develop`), pushes to `main` keep a
-release PR open with the next version and changelog, and merging it builds
+note with `knope document-change` (in `nix develop`), run **Prepare release**
+(Actions tab) to open a release PR with the next version and changelog, and
+merging it builds
 `dist/` into `meeting-capture-extension-v<version>.zip` (manifest at the zip
 root) on a `v<version>` GitHub release. `manifest.config.ts` reads
 `package.json`, so the manifest's version always matches the tag.
