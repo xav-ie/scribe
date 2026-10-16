@@ -70,6 +70,9 @@ Chromium browser.
 3. **Record.** Join a Meet or Zoom call in Chrome, open the extension and click
    **Start recording**.
 
+Recording laws differ by place, and some require everyone's consent: check
+yours, and tell people when you're recording them.
+
 > [!WARNING]
 > The server has **no authentication**: anyone who can reach it can stream
 > audio and read every transcript. Keep it on a private network or behind an
