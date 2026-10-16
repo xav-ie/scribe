@@ -69,11 +69,62 @@ export function serverOrigins(wsUrl: string): string[] {
   return [`${url.protocol}//${url.hostname}/*`, `${http}//${url.hostname}/*`];
 }
 
+/**
+ * What the server says about this URL: `ok` (its token is right), `open` (it
+ * has no token at all), `needs-token` (it wants one and the URL carries none),
+ * `bad-token` (it refuses this one), or `unreachable` (no usable answer).
+ */
+export type ServerCheck =
+  'ok' | 'open' | 'needs-token' | 'bad-token' | 'unreachable';
+
+export async function checkServer(wsUrl: string): Promise<ServerCheck> {
+  try {
+    const signal = AbortSignal.timeout(5000);
+    const info = await fetch(apiUrl(wsUrl, '/api/info'), { signal });
+    if (!info.ok) return 'unreachable';
+    const { auth } = (await info.json()) as { auth?: boolean };
+    if (!auth) return 'open';
+    if (!splitServerUrl(wsUrl).token) return 'needs-token';
+    // Any route behind the token tells whether it's the right one.
+    const probe = await fetch(apiUrl(wsUrl, '/api/vocab'), {
+      headers: apiHeaders(wsUrl),
+      signal,
+    });
+    return probe.status === 401 ? 'bad-token' : 'ok';
+  } catch {
+    return 'unreachable';
+  }
+}
+
 export type SaveResult =
-  | { status: 'saved' }
+  /** Saved; `server` is what the server said, for the page to report. */
+  | { status: 'saved'; server: ServerCheck }
   | { status: 'invalid'; error: string }
   /** Chrome hasn't granted access to the server's host yet: ask the user. */
   | { status: 'needs-access'; host: string; origins: string[] };
+
+const TOKEN_HELP =
+  "Copy the server's URL from its web UI (log in, then pair extension).";
+
+// The URL can reach its host: check it against the server, then save it unless
+// the server would refuse it.
+async function checkAndSave(wsUrl: string): Promise<SaveResult> {
+  const server = await checkServer(wsUrl);
+  if (server === 'needs-token') {
+    return {
+      status: 'invalid',
+      error: `This server needs its access token, and this URL has none. ${TOKEN_HELP}`,
+    };
+  }
+  if (server === 'bad-token') {
+    return {
+      status: 'invalid',
+      error: `This server doesn't accept the token in this URL. ${TOKEN_HELP}`,
+    };
+  }
+  await setSettings({ wsUrl });
+  return { status: 'saved', server };
+}
 
 /** Save the server if the extension may already reach its host. */
 export async function saveServerUrl(wsUrl: string): Promise<SaveResult> {
@@ -87,21 +138,24 @@ export async function saveServerUrl(wsUrl: string): Promise<SaveResult> {
   if (!(await chrome.permissions.contains({ origins }))) {
     return { status: 'needs-access', host: new URL(wsUrl).hostname, origins };
   }
-  await setSettings({ wsUrl });
-  return { status: 'saved' };
+  return checkAndSave(wsUrl);
 }
 
 /**
- * Ask Chrome for access to the server's host, then save it. Resolves to why it
- * wasn't saved, or null. Chrome only asks during a user gesture, so call this
- * straight from the click that asks for it: the request comes before any await.
+ * Ask Chrome for access to the server's host, then check and save it. Chrome
+ * only asks during a user gesture, so call this straight from the click that
+ * asks for it: the request comes before any await.
  */
 export async function grantServerAccess(
   wsUrl: string,
   origins: string[],
-): Promise<string | null> {
+): Promise<SaveResult> {
   const granted = await chrome.permissions.request({ origins });
-  if (!granted) return `Access to ${new URL(wsUrl).hostname} was not granted.`;
-  await setSettings({ wsUrl });
-  return null;
+  if (!granted) {
+    return {
+      status: 'invalid',
+      error: `Access to ${new URL(wsUrl).hostname} was not granted.`,
+    };
+  }
+  return checkAndSave(wsUrl);
 }

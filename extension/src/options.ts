@@ -5,6 +5,8 @@ import {
   grantServerAccess,
   saveServerUrl,
   serverOrigins,
+  type SaveResult,
+  type ServerCheck,
 } from './config';
 
 const $ = <T extends HTMLElement>(id: string) =>
@@ -40,9 +42,18 @@ function closeAccess(): void {
   accessEl.classList.add('hidden');
 }
 
-async function save(wsUrl: string): Promise<void> {
-  const result = await saveServerUrl(wsUrl);
-  if (result.status === 'saved') show(savedEl, 'Saved.');
+const SAVED: Record<ServerCheck, string> = {
+  ok: 'Saved.',
+  open: 'Saved. This server has no access token: anyone who can reach it can stream to it and read every meeting.',
+  unreachable:
+    "Saved, but the server didn't answer. Check the URL, and that the server is running.",
+  // Never saved: checkAndSave refuses these with an error instead.
+  'needs-token': '',
+  'bad-token': '',
+};
+
+function report(wsUrl: string, result: SaveResult): void {
+  if (result.status === 'saved') show(savedEl, SAVED[result.server]);
   else if (result.status === 'invalid') show(errorEl, result.error);
   else {
     show(null);
@@ -50,21 +61,31 @@ async function save(wsUrl: string): Promise<void> {
   }
 }
 
+async function save(wsUrl: string): Promise<void> {
+  show(savedEl, 'Checking the server…');
+  report(wsUrl, await saveServerUrl(wsUrl));
+}
+
 // Chrome only shows its permission prompt from a click, so the request is the
 // first thing this button's handler awaits.
 async function grant(): Promise<void> {
   if (!pending) return;
   const { wsUrl, origins } = pending;
-  const error = await grantServerAccess(wsUrl, origins);
+  const result = await grantServerAccess(wsUrl, origins);
   closeAccess();
-  if (error) show(errorEl, `${error} The server was not saved.`);
-  else show(savedEl, 'Access allowed. Saved.');
+  report(wsUrl, result);
 }
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   closeAccess();
   void save(wsUrlInput.value.trim());
+});
+
+// An edit makes the last result stale: clear it, and any pending access box.
+wsUrlInput.addEventListener('input', () => {
+  closeAccess();
+  show(null);
 });
 
 $<HTMLButtonElement>('grant').addEventListener('click', () => void grant());
