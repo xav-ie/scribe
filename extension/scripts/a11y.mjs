@@ -31,6 +31,7 @@ const states = [
       segments,
       error: 'Cannot reach streaming service at wss://scribe.example.com/ws',
       warning: 'Your microphone is sending pure silence.',
+      insecure: true,
     },
   },
   {

@@ -365,3 +365,7 @@ header h1 {
   flex: 1;
   white-space: nowrap;
 }
+.hint {
+  margin: -4px 0 0;
+  font-size: 12px;
+}

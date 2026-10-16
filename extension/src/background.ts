@@ -8,7 +8,13 @@
 // chrome.storage.local (joinSession) + an in-memory cache, so a streamed word or
 // speaker event arriving after the worker was torn down still reconstructs.
 
-import { BUILD, getSettings } from './config';
+import {
+  apiHeaders,
+  apiUrl,
+  BUILD,
+  getSettings,
+  splitServerUrl,
+} from './config';
 import { dlog, expose, setDebug } from './debug';
 import type { SpeakerDiagnostics } from './speaker/types';
 import {
@@ -228,13 +234,15 @@ async function startRecording(): Promise<void> {
   if (stopped()) return;
 
   capturing = sessionId;
+  const server = splitServerUrl(settings.wsUrl);
   chrome.runtime
     .sendMessage({
       type: 'OFFSCREEN_START',
       target: 'offscreen',
       streamId,
       withMic: settings.withMic,
-      wsUrl: settings.wsUrl,
+      wsUrl: server.url,
+      token: server.token,
       debug: settings.debug,
       sessionId,
       saveAudio: settings.saveAudio,
@@ -248,7 +256,18 @@ async function startRecording(): Promise<void> {
   }, START_TIMEOUT_MS);
 
   if (detecting !== true) await setState({ warning: detecting });
+  checkServerToken(settings.wsUrl).catch(() => {});
   uploadUnsent().catch(() => {});
+}
+
+// Ask the server whether it requires a token; the popup warns while it
+// doesn't, since then anyone who can reach it can read every meeting.
+async function checkServerToken(wsUrl: string): Promise<void> {
+  const res = await fetch(apiUrl(wsUrl, '/api/info'), {
+    signal: AbortSignal.timeout(5000),
+  });
+  const { auth } = (await res.json()) as { auth?: boolean };
+  await setState({ insecure: auth === false });
 }
 
 // Only the frame showing participant tiles answers (Zoom's meeting runs in an
@@ -429,12 +448,10 @@ async function uploadEach(): Promise<void> {
   if (!wsUrl) return;
   try {
     for (const id of ids) {
-      const url = new URL(`/api/sessions/${id}`, wsUrl);
-      url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
-      const res = await fetch(url, {
+      const res = await fetch(apiUrl(wsUrl, `/api/sessions/${id}`), {
         signal: AbortSignal.timeout(15_000),
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...apiHeaders(wsUrl) },
         body: JSON.stringify(unsent[id]),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

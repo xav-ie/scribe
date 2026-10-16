@@ -30,11 +30,17 @@ Tunables (set by the Nix module via env):
   SCRIBE_BOOST_SCORE  per-token boost inside a phrase (default 1.0; 3.0 began
                       forcing names into ordinary words in testing)
   SCRIBE_BOOST_ALPHA  weight of the boost in decoding (default 1.0)
+  SCRIBE_TOKEN_FILE   a file holding the access token every client must present
+                      (preferred: works with Docker/compose secrets, systemd
+                      credentials, agenix/sops). SCRIBE_TOKEN takes the token
+                      itself as an escape hatch; setting both is an error.
+                      Without either the server is open, and says so.
   SCRIBE_ALLOWED_HOSTS  comma-separated host names the server answers to (e.g.
                       scribe.example.com,localhost); unset answers any Host
 
 A stream's first text message is {"sampleRate", "sessionId", "channel", "save",
-"boost"}; "boost" (participant names) is boosted along with the vocabulary.
+"boost", "token"}; "boost" (participant names) is boosted along with the
+vocabulary, and "token" is the access token when the server has one.
 {"type": "end"} flushes the last partial step and is answered with the final
 words and {"type": "done"}; the stream should send no audio after it.
 
@@ -52,6 +58,7 @@ and editing the vocabulary.
 import asyncio
 import ctypes
 import gc
+import hmac
 import json
 import logging
 import math
@@ -75,7 +82,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
@@ -94,6 +101,7 @@ from nemo.utils import logging as nemo_logging
 from omegaconf import OmegaConf, open_dict
 from scipy.signal import resample_poly
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.requests import HTTPConnection
 
 # NeMo logs the full model config on load — pages of noise. Keep WARNING and up.
 nemo_logging.set_verbosity(logging.WARNING)
@@ -197,10 +205,81 @@ if model.cfg.encoder.att_context_style == "chunked_limited_with_rc":
         att_context_size=[_ctx_frames.left, _ctx_frames.chunk, _ctx_frames.right]
     )
 
+
+def _load_token(environ):
+    """The access token from SCRIBE_TOKEN_FILE (preferred) or SCRIBE_TOKEN, or
+    None to leave the server open."""
+    path, value = environ.get("SCRIBE_TOKEN_FILE"), environ.get("SCRIBE_TOKEN")
+    if path and value:
+        raise RuntimeError("scribe: set SCRIBE_TOKEN_FILE or SCRIBE_TOKEN, not both")
+    token = Path(path).read_text().strip() if path else (value or "").strip()
+    if path and not token:
+        raise RuntimeError(f"scribe: SCRIBE_TOKEN_FILE {path} is empty")
+    return token or None
+
+
+TOKEN = _load_token(os.environ)
+if TOKEN is None:
+    print(
+        "[scribe] WARNING: no access token (SCRIBE_TOKEN_FILE); anyone who can "
+        "reach this server can stream to it and read every meeting",
+        flush=True,
+    )
+# The web UI's login cookie, sent by the browser to the page and its sockets.
+COOKIE = "scribe_token"
+# Reachable without a token: the page (it asks for one), the health check, and
+# what the page needs to log in.
+OPEN_PATHS = {"/", "/health", "/api/info", "/api/login", "/api/logout"}
+
+
+def _token_ok(candidate):
+    return TOKEN is None or (
+        isinstance(candidate, str)
+        and hmac.compare_digest(candidate.encode(), TOKEN.encode())
+    )
+
+
+def _presented_token(conn):
+    """The token a request or socket handshake carries: a bearer header (the
+    extension's uploads, MCP and API clients) or the web UI's cookie."""
+    auth = conn.headers.get("authorization", "")
+    if auth[:7].lower() == "bearer ":
+        return auth[7:].strip()
+    return conn.cookies.get(COOKIE)
+
+
+class TokenAuth:
+    """Every route but OPEN_PATHS needs the token. /ws checks it itself, since
+    the extension can only send it in its first message."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if (
+            TOKEN is None
+            or scope["type"] not in ("http", "websocket")
+            or scope["path"] in OPEN_PATHS
+            or (scope["type"] == "websocket" and scope["path"] == "/ws")
+            or _token_ok(_presented_token(HTTPConnection(scope)))
+        ):
+            await self.app(scope, receive, send)
+        elif scope["type"] == "websocket":
+            await receive()  # websocket.connect; closing now refuses it (403)
+            await send({"type": "websocket.close", "code": 1008})
+        else:
+            refused = JSONResponse(
+                {"detail": "a token is required"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            await refused(scope, receive, send)
+
+
 app = FastAPI()
-# scribe has no authentication (see the README). Listing the names it is served
-# under refuses requests for any other Host, which stops DNS rebinding: a web
-# page whose own hostname resolves to this server.
+app.add_middleware(TokenAuth)
+# Listing the names scribe is served under refuses requests for any other Host,
+# which stops DNS rebinding: a web page whose own hostname resolves to it.
 ALLOWED_HOSTS = [h for h in os.environ.get("SCRIBE_ALLOWED_HOSTS", "").split(",") if h]
 if ALLOWED_HOSTS:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
@@ -596,6 +675,54 @@ def ui():
     return UI_HTML
 
 
+@app.get("/api/info")
+def info():
+    """Whether this server needs a token; clients warn when it doesn't."""
+    return {"auth": TOKEN is not None}
+
+
+def _secure(request):
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    return proto.split(",")[0].strip() in ("https", "wss")
+
+
+@app.post("/api/login")
+async def login(request: Request):
+    """The web UI trades the token for a cookie, which its audio players and
+    live view (which can't send headers) then carry."""
+    body = await _json_body(request, 4096)
+    token = body.get("token") if isinstance(body, dict) else None
+    if TOKEN is None or not _token_ok(token):
+        raise HTTPException(401)
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        COOKIE,
+        TOKEN,
+        max_age=365 * 24 * 3600,
+        httponly=True,
+        samesite="strict",
+        secure=_secure(request),
+    )
+    return response
+
+
+@app.post("/api/logout")
+def logout():
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(COOKIE)
+    return response
+
+
+@app.get("/api/pairing")
+def pairing(request: Request):
+    """The URL to paste into the extension's settings, token included. Only
+    reachable with the token, so it reveals nothing new."""
+    scheme = "wss" if _secure(request) else "ws"
+    host = request.headers.get("x-forwarded-host", request.url.netloc)
+    url = f"{scheme}://{host}/ws"
+    return {"url": f"{url}#token={TOKEN}" if TOKEN else url}
+
+
 @app.get("/api/sessions")
 def list_sessions():
     out = []
@@ -723,6 +850,9 @@ async def ws(websocket: WebSocket):
         await websocket.close(1008)
         return
     await websocket.accept()
+    # A token in the handshake (bearer header, or the web UI's cookie) or in
+    # the first message, which is all the extension can send.
+    authed = _token_ok(_presented_token(websocket))
     state = StreamState()
     recording = None
 
@@ -801,6 +931,10 @@ async def ws(websocket: WebSocket):
                 if config is None:
                     await websocket.close(1003, "expected a JSON object")
                     break
+                authed = authed or _token_ok(config.get("token"))
+                if not authed:
+                    await websocket.close(1008, "a token is required")
+                    break
                 # The client is done talking: decode the audio still short of a
                 # step (and the right context held back), then say so.
                 if config.get("type") == "end":
@@ -843,6 +977,9 @@ async def ws(websocket: WebSocket):
             raw = msg.get("bytes")
             if not raw:
                 continue
+            if not authed:
+                await websocket.close(1008, "a token is required")
+                break
             if len(raw) % 2:
                 await websocket.close(1003, "PCM frames must be whole int16 samples")
                 break

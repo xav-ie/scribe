@@ -58,6 +58,8 @@ interface StreamOpts {
   saveAudio: boolean;
   /** Participant names the streaming service should boost. */
   boost: string[];
+  /** The server's access token, sent in each stream's first message. */
+  token?: string;
 }
 
 let session: Session | null = null;
@@ -232,6 +234,7 @@ function openChannel(
         channel: channelName,
         save: stream.saveAudio,
         boost: stream.boost,
+        token: stream.token,
       }),
     );
     if (debug) {
@@ -272,11 +275,22 @@ function openChannel(
       removeMic();
     }
   });
-  ws.addEventListener('close', () => {
+  ws.addEventListener('close', (event) => {
     channel.flushed?.();
     if (channel.closing) return; // deliberate (stop / mic toggled off)
     if (primary) {
-      if (session) sendState(stream.sessionId, { status: 'idle' });
+      // 1008: the server wants a token this URL doesn't carry, or another one.
+      if (session)
+        sendState(
+          stream.sessionId,
+          event.code === 1008
+            ? {
+                status: 'idle',
+                error:
+                  'The server needs its access token. Copy the URL from its web UI (pair extension) into the settings page.',
+              }
+            : { status: 'idle' },
+        );
       void teardown();
     } else {
       removeMic();
@@ -450,6 +464,7 @@ async function start(
 
     const stream: StreamOpts = {
       wsUrl: opts.wsUrl,
+      token: opts.token,
       debug: opts.debug,
       sessionId: opts.sessionId,
       saveAudio: opts.saveAudio,

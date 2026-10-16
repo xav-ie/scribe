@@ -33,6 +33,13 @@ in
       description = "Host dir bind-mounted as /cache: HF/NeMo model cache, plus saved recordings under recordings/.";
     };
 
+    tokenFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/run/agenix/scribe-token";
+      description = "File holding the access token every client must present (agenix, sops-nix, or any file outside the Nix store). Without it the server is open to anyone who can reach it, and says so.";
+    };
+
     allowedHosts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -45,6 +52,13 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = cfg.tokenFile == null || !lib.hasPrefix builtins.storeDir cfg.tokenFile;
+        message = "services.scribe.tokenFile must be outside the Nix store, which anyone can read.";
+      }
+    ];
+
     hardware.nvidia-container-toolkit.enable = true;
 
     systemd.tmpfiles.rules = [
@@ -76,6 +90,11 @@ in
       image = "localhost/scribe:latest";
       environment = {
         SCRIBE_ALLOWED_HOSTS = lib.concatStringsSep "," cfg.allowedHosts;
+      }
+      // lib.optionalAttrs (cfg.tokenFile != null) {
+        SCRIBE_TOKEN_FILE = "/run/secrets/scribe-token";
+      }
+      // {
         HF_HOME = "/cache/huggingface";
         NEMO_CACHE_DIR = "/cache/nemo";
         NUMBA_CACHE_DIR = "/tmp";
@@ -88,7 +107,8 @@ in
       };
       volumes = [
         "${cfg.dataDir}:/cache"
-      ];
+      ]
+      ++ lib.optional (cfg.tokenFile != null) "${cfg.tokenFile}:/run/secrets/scribe-token:ro";
       extraOptions = [
         "--device=nvidia.com/gpu=all"
         "--security-opt=label=disable"

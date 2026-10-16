@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  apiHeaders,
+  apiUrl,
   DEFAULT_SETTINGS,
   getSettings,
   grantServerAccess,
   saveServerUrl,
   serverOrigins,
+  splitServerUrl,
 } from './config';
 import { chromeStub } from './test/chrome';
 
@@ -83,5 +86,35 @@ describe('getSettings', () => {
   it('fills in defaults around what was stored', async () => {
     chromeStub.sync.set('withMic', true);
     expect(await getSettings()).toEqual({ ...DEFAULT_SETTINGS, withMic: true });
+  });
+});
+
+describe('splitServerUrl', () => {
+  it('takes the token out of the fragment', () => {
+    expect(splitServerUrl('wss://s.example.com/ws#token=abc123')).toEqual({
+      url: 'wss://s.example.com/ws',
+      token: 'abc123',
+    });
+  });
+
+  it('leaves a plain URL alone', () => {
+    expect(splitServerUrl('ws://localhost:8000/ws')).toEqual({
+      url: 'ws://localhost:8000/ws',
+      token: undefined,
+    });
+  });
+});
+
+describe('apiUrl and apiHeaders', () => {
+  it('point at the HTTP API on the same host, with the token', () => {
+    const saved = 'wss://s.example.com/ws#token=abc123';
+    expect(apiUrl(saved, '/api/info').href).toBe(
+      'https://s.example.com/api/info',
+    );
+    expect(apiUrl('ws://localhost:8000/ws', '/api/info').href).toBe(
+      'http://localhost:8000/api/info',
+    );
+    expect(apiHeaders(saved)).toEqual({ Authorization: 'Bearer abc123' });
+    expect(apiHeaders('ws://localhost:8000/ws')).toEqual({});
   });
 });

@@ -1,5 +1,5 @@
 import mark from '../../assets/logo/mark.svg';
-import { BUILD, getSettings, setSettings } from './config';
+import { BUILD, getSettings, setSettings, splitServerUrl } from './config';
 import {
   getState,
   JOIN_SESSION_KEY,
@@ -30,6 +30,7 @@ const wsUrlEl = $<HTMLElement>('wsUrl');
 const micSetupLink = $<HTMLAnchorElement>('micSetup');
 const errorEl = $<HTMLElement>('error');
 const warningEl = $<HTMLElement>('warning');
+const insecureEl = $<HTMLElement>('insecure');
 const resultEl = $<HTMLElement>('result');
 const speakersEl = $<HTMLElement>('speakers');
 const transcriptEl = $<HTMLElement>('transcript');
@@ -51,6 +52,7 @@ function render(state: RecState): void {
   }
   warningEl.textContent = state.warning ?? '';
   warningEl.classList.toggle('hidden', !state.warning);
+  insecureEl.classList.toggle('hidden', !state.insecure);
 
   if (state.segments && state.segments.length > 0) {
     renderSegments(state.segments);
@@ -84,7 +86,12 @@ async function init(): Promise<void> {
   micToggle.checked = settings.withMic;
   debugToggle.checked = settings.debug;
   saveAudioToggle.checked = settings.saveAudio;
-  wsUrlEl.textContent = settings.wsUrl || 'not set';
+  // The token stays out of sight.
+  wsUrlEl.textContent = 'not set';
+  if (settings.wsUrl) {
+    const { url, token } = splitServerUrl(settings.wsUrl);
+    wsUrlEl.textContent = token ? `${url} (with token)` : url;
+  }
   $<HTMLElement>('build').textContent = BUILD;
 
   render(await getState());

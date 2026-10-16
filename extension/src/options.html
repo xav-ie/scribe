@@ -27,8 +27,13 @@
           spellcheck="false"
           required
           placeholder="wss://scribe.example.com/ws"
+          aria-describedby="wsUrlHelp"
         />
       </label>
+      <p id="wsUrlHelp" class="muted hint">
+        If the server has an access token, copy its URL from the server's web UI
+        (pair extension): it ends in <code>#token=…</code>.
+      </p>
       <button type="submit" class="primary">Save</button>
     </form>
 

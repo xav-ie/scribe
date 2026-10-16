@@ -32,6 +32,32 @@ export async function setSettings(patch: Partial<Settings>): Promise<void> {
   await chrome.storage.sync.set(patch);
 }
 
+/**
+ * The server URL as saved, split into the WebSocket URL and the access token
+ * from its `#token=…` part (the web UI's Pair page gives that form). WebSocket
+ * URLs can't carry a fragment, so the token travels in the first message.
+ */
+export function splitServerUrl(wsUrl: string): { url: string; token?: string } {
+  const url = new URL(wsUrl);
+  const token =
+    new URLSearchParams(url.hash.slice(1)).get('token') || undefined;
+  url.hash = '';
+  return { url: url.href, token };
+}
+
+/** The server's HTTP API at `path`, on the same host as its WebSocket. */
+export function apiUrl(wsUrl: string, path: string): URL {
+  const url = new URL(path, splitServerUrl(wsUrl).url);
+  url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:';
+  return url;
+}
+
+/** Headers for the server's HTTP API: the token, when there is one. */
+export function apiHeaders(wsUrl: string): Record<string, string> {
+  const { token } = splitServerUrl(wsUrl);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 /** Host patterns for the WebSocket and the HTTP session API on the same host. */
 export function serverOrigins(wsUrl: string): string[] {
   const url = new URL(wsUrl);

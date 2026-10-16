@@ -45,6 +45,8 @@ interface OffscreenStart {
   streamId: string;
   withMic: boolean;
   wsUrl: string;
+  /** The server's access token, if it needs one. */
+  token?: string;
   debug: boolean;
   /** Identifies this recording on the streaming service (and its saved audio). */
   sessionId: string;

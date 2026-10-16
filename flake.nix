@@ -67,6 +67,7 @@
                 self.nixosModules.default
                 {
                   services.scribe.enable = true;
+                  services.scribe.tokenFile = "/run/secrets/scribe-token";
                   boot.loader.grub.enable = false;
                   fileSystems."/" = {
                     device = "none";
