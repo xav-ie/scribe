@@ -1,0 +1,25 @@
+# The scribe server on an NVIDIA GPU (needs the NVIDIA container toolkit):
+#   docker compose up -d
+# then point the extension at ws://localhost:8000/ws.
+services:
+  scribe:
+    image: ghcr.io/xav-ie/scribe:latest
+    # build: server   # or build it from this checkout instead
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - scribe:/cache # model cache, recordings, vocabulary
+    environment:
+      # Host names the server answers to (see the README's security note).
+      SCRIBE_ALLOWED_HOSTS: localhost,127.0.0.1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  scribe:

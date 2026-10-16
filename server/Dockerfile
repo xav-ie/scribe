@@ -24,7 +24,13 @@ LABEL org.opencontainers.image.title="scribe" \
       org.opencontainers.image.description="Live meeting transcription server: NVIDIA Parakeet streaming ASR, web UI and MCP" \
       org.opencontainers.image.licenses="MIT"
 
+# Model caches, recordings and the vocabulary all live under /cache: mount a
+# volume there to keep them across restarts.
 ENV PATH="/app/.venv/bin:$PATH" \
-    HOME=/tmp
+    HOME=/tmp \
+    HF_HOME=/cache/huggingface \
+    NEMO_CACHE_DIR=/cache/nemo \
+    NUMBA_CACHE_DIR=/tmp \
+    PYTHONWARNINGS=ignore::SyntaxWarning
 EXPOSE 8000
 CMD ["uvicorn", "stream_server:app", "--host", "0.0.0.0", "--port", "8000"]

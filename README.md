@@ -2,6 +2,10 @@
 
 # scribe
 
+[![CI](https://github.com/xav-ie/scribe/actions/workflows/ci.yml/badge.svg)](https://github.com/xav-ie/scribe/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/xav-ie/scribe?color=c62818)](https://github.com/xav-ie/scribe/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-c62818)](LICENSE)
+
 **Live meeting transcription on your own GPU, with every speaker named.** A
 Chrome extension streams your Google Meet or Zoom call to a self-hosted
 recognition server and shows captions as people talk. Every meeting is kept,
@@ -29,38 +33,68 @@ searchable by you and by your AI agents.
 The server sends back every word with its timing, and the extension labels it
 with whoever the meeting showed as speaking at that moment.
 
+## Why scribe
+
+Cloud note takers upload your meetings to their servers, often join the call as
+a bot, and charge per seat. scribe is the opposite on all three:
+
+- **Nothing leaves your network,** and the only cost is a GPU you already have.
+- **No bot in the call.** The extension listens from your own browser tab, so
+  nobody has to admit a "notetaker" into the meeting.
+- **Open and yours:** MIT licensed, with transcripts in plain JSON on your disk.
+
+**Current limits:** English only, Chrome (or another Chromium) with Google Meet
+or Zoom in the browser, and an NVIDIA GPU for the server.
+
 ## Quick start
 
-You need a Linux machine with an NVIDIA GPU and the NVIDIA container toolkit
-for the server, and Chrome or another Chromium browser for the extension.
+You need a Linux machine with an NVIDIA GPU (about 2.6 GB of GPU memory and
+10 GB of disk) with the NVIDIA container toolkit, and Chrome or another
+Chromium browser.
 
 1. **Run the server.** The model downloads on first start.
 
    ```sh
-   podman build -t scribe server
-   podman run --device nvidia.com/gpu=all -p 127.0.0.1:8000:8000 -v scribe:/cache \
-     -e HF_HOME=/cache/huggingface -e NEMO_CACHE_DIR=/cache/nemo scribe
+   docker run -d --gpus all -p 127.0.0.1:8000:8000 -v scribe:/cache ghcr.io/xav-ie/scribe
    ```
 
-   (`docker run --gpus all ...` works the same; on NixOS, see below.)
+   Or `docker compose up -d` with this repository's [`compose.yaml`](compose.yaml).
+   With podman, use `--device nvidia.com/gpu=all` instead of `--gpus all`.
 
-2. **Install the extension.** Build it, then in `chrome://extensions` turn on
-   Developer mode, click **Load unpacked** and pick `extension/dist`.
-
-   ```sh
-   cd extension && pnpm install && pnpm build
-   ```
-
-   Its settings page opens: enter your server, e.g. `ws://localhost:8000/ws`.
+2. **Install the extension.** Download `meeting-capture-extension-*.zip` from
+   the [latest release](https://github.com/xav-ie/scribe/releases/latest) and
+   unzip it. In `chrome://extensions`, turn on Developer mode, click
+   **Load unpacked** and pick the unzipped folder. On the settings page that
+   opens, enter `ws://localhost:8000/ws`.
 
 3. **Record.** Join a Meet or Zoom call in Chrome, open the extension and click
-   **Start recording**. Browse saved meetings at `http://localhost:8000`.
+   **Start recording**.
 
 > [!WARNING]
 > The server has **no authentication**: anyone who can reach it can stream
 > audio and read every transcript. Keep it on a private network or behind an
 > authenticating proxy, and set `SCRIBE_ALLOWED_HOSTS` to the host names you
 > serve it under.
+
+## After the meeting
+
+Every meeting is saved on the server. Open `http://localhost:8000` to browse
+them: click any line to replay the audio from there, or follow a recording live
+while it happens.
+
+![The web UI showing a saved meeting: speaker chips, audio players for the tab and microphone, and the transcript with the line being played highlighted](assets/web-ui.png)
+
+Your AI agents can read them too. Add the server's MCP endpoint to Claude Code:
+
+```sh
+claude mcp add --transport http scribe http://localhost:8000/mcp
+```
+
+Then ask things like _"What did we decide about the old endpoint in this
+morning's release call?"_. The agent finds the meeting with `list_meetings` or
+`search_transcripts` and reads it with `get_transcript`. It can also save notes
+on a meeting, and add names it saw misheard to the vocabulary so the next
+meeting gets them right.
 
 <details>
 <summary><b>NixOS module</b></summary>
@@ -90,6 +124,16 @@ for the server, and Chrome or another Chromium browser for the extension.
 The module builds the image on the host (`build-scribe-image.service`), so the
 multi-GB CUDA environment stays out of the Nix store, and runs it with podman
 and the NVIDIA container toolkit.
+
+</details>
+
+<details>
+<summary><b>Build from source</b></summary>
+
+```sh
+podman build -t scribe server     # or docker build
+cd extension && pnpm install && pnpm build   # then load extension/dist
+```
 
 </details>
 
