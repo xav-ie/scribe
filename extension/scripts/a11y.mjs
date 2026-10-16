@@ -59,7 +59,7 @@ try {
     current = state;
     const page = await browser.newPage();
     await page.setViewport({
-      width: state.page === 'popup' ? 348 : 640,
+      width: state.page === 'popup' ? 320 : 640,
       height: 700,
     });
     await page.goto(`${preview.url}/src/${state.page}.html`, {

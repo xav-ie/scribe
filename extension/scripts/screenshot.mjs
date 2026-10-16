@@ -80,7 +80,7 @@ const hero = `<!doctype html>
   .controls { position: absolute; left: 24px; right: 420px; bottom: 20px; display: flex; justify-content: center; gap: 14px; }
   .controls span { width: 48px; height: 48px; border-radius: 50%; background: #3c4043; }
   .controls span.end { width: 72px; border-radius: 24px; background: #ea4335; }
-  iframe { position: absolute; top: 56px; right: 14px; width: 348px; height: 612px; border: 0; border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.55); }
+  iframe { position: absolute; top: 56px; right: 14px; width: 320px; height: 612px; border: 0; border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.55); }
 </style></head><body>
   <div class="window">
     <div class="toolbar">
