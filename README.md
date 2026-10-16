@@ -79,13 +79,6 @@ Chromium browser.
 Recording laws differ by place, and some require everyone's consent: check
 yours, and tell people when you're recording them.
 
-> [!IMPORTANT]
-> Without a token (`SCRIBE_TOKEN_FILE`, or `SCRIBE_TOKEN` as an escape hatch)
-> the server is open to anyone who can reach it, and the web UI and extension
-> say so. Serve it over HTTPS when it leaves your machine, so the token isn't
-> sent in the clear, and set `SCRIBE_ALLOWED_HOSTS` to the names you serve it
-> under.
-
 ## After the meeting
 
 Every meeting is saved on the server. Open `http://localhost:8000` to browse
@@ -209,10 +202,16 @@ final update and `{"type": "done"}`.
 
 Environment variables, documented at the top of
 [`server/stream_server.py`](server/stream_server.py): the model, context sizes,
-boosting strength, where recordings and the vocabulary live, and
-`SCRIBE_ALLOWED_HOSTS`. Browser pages on other sites can't open the server's
-WebSockets (their Origin must match the Host, so a reverse proxy should pass
-the Host header through, e.g. nginx's `proxy_set_header Host $host`).
+boosting strength, where recordings and the vocabulary live, the access token
+(`SCRIBE_TOKEN_FILE`, or `SCRIBE_TOKEN` as an escape hatch) and
+`SCRIBE_ALLOWED_HOSTS`.
+
+Without a token the server is open to anyone who can reach it, and the web UI
+and extension say so. When it leaves your machine, serve it over HTTPS so the
+token isn't sent in the clear, and set `SCRIBE_ALLOWED_HOSTS` to the names you
+serve it under. Browser pages on other sites can't open the server's
+WebSockets: their Origin must match the Host, so a reverse proxy should pass
+the Host header through (e.g. nginx's `proxy_set_header Host $host`).
 
 </details>
 

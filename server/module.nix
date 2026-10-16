@@ -47,7 +47,7 @@ in
         "scribe.example.com"
         "localhost"
       ];
-      description = "Host names scribe answers to; requests for any other Host are refused, which stops DNS rebinding. Empty answers any Host. scribe has no authentication either way.";
+      description = "Host names scribe answers to; requests for any other Host are refused, which stops DNS rebinding. Empty answers any Host. Access itself is controlled by tokenFile.";
     };
   };
 

@@ -287,6 +287,13 @@ try {
     await page.goto(`${preview.url}/${url}`, {
       waitUntil: webUi ? 'load' : 'networkidle0',
     });
+    // Chrome sizes an extension popup to its content; do the same here.
+    if (url === 'hero.html') {
+      await page.evaluate(() => {
+        const frame = document.querySelector('iframe');
+        frame.style.height = `${frame.contentDocument.body.getBoundingClientRect().height}px`;
+      });
+    }
     if (webUi) {
       await page.waitForFunction(
         () =>
