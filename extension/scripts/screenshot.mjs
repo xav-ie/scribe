@@ -193,21 +193,111 @@ const diagram = `<!doctype html>
   </div>
 </div></body></html>`;
 
+// The server's web UI (server/ui.html, unchanged) on a saved meeting: its API
+// calls answered with a sample session, and silent audio for the players.
+const SID = '5f6a7b8c-1d2e-4f30-8a41-b2c3d4e5f607';
+const lines = [
+  ['Ada Lovelace', 0, 'Morning! Should we start with the release?'],
+  ['Grace Hopper', 4, 'Yes. The build passed overnight, so we can ship today.'],
+  ['Me', 10, 'Great. I will write the notes and tag it after this call.'],
+  ['Alan Turing', 15, 'Can we keep the old endpoint for one more week?'],
+  ['Ada Lovelace', 20, 'Sure, it costs us nothing to keep it around.'],
+  ['Grace Hopper', 26, 'Then I will add a deprecation notice to the docs.'],
+  ['Me', 33, 'And I will email the two customers still calling it.'],
+  ['Alan Turing', 40, 'Perfect. That is everything from my side.'],
+];
+const session = {
+  sessionId: SID,
+  live: false,
+  session: {
+    startedAt: t0,
+    stoppedAt: t0 + 32 * 60_000,
+    platform: 'meet',
+    segments: lines.map(([speaker, start, text]) =>
+      segment(speaker, start, text),
+    ),
+  },
+  channels: [
+    {
+      stem: 'tab',
+      channel: 'tab',
+      audio: true,
+      epoch: t0,
+      boost: ['Ada Lovelace', 'Grace Hopper', 'Alan Turing', 'Parakeet'],
+    },
+    { stem: 'mic', channel: 'mic', audio: true, epoch: t0 },
+  ],
+};
+// 32 minutes of 8 kHz 8-bit silence, so the players show a real length.
+function silentWav(seconds) {
+  const n = 8000 * seconds;
+  const wav = Buffer.alloc(44 + n, 128);
+  wav.write('RIFF', 0);
+  wav.writeUInt32LE(36 + n, 4);
+  wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16);
+  wav.writeUInt16LE(1, 20);
+  wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24);
+  wav.writeUInt32LE(8000, 28);
+  wav.writeUInt16LE(1, 32);
+  wav.writeUInt16LE(8, 34);
+  wav.write('data', 36);
+  wav.writeUInt32LE(n, 40);
+  return wav;
+}
+const audio = { type: 'audio/wav', body: silentWav(32 * 60) };
+const webUi = readFileSync(
+  path.join(assets, '..', 'server', 'ui.html'),
+  'utf8',
+).replace(
+  '<head>',
+  () => `<head><script>
+  const real = fetch;
+  window.fetch = (url, opts) => String(url).startsWith('/api/sessions/')
+    ? Promise.resolve(new Response(${JSON.stringify(JSON.stringify(session))}))
+    : real(url, opts);
+  location.hash = '#/s/${SID}';
+</script>`,
+);
+
 const preview = await servePreview(() => ({ rec: recording }), {
   '/hero.html': hero,
   '/diagram.html': diagram,
+  '/web-ui.html': webUi,
+  [`/api/sessions/${SID}/audio/tab`]: audio,
+  [`/api/sessions/${SID}/audio/mic`]: audio,
 });
 const browser = await launchChrome();
 try {
   const shots = [
     ['hero.html', 'screenshot.png', 1280, 760],
     ['diagram.html', 'how-it-works.png', 1400, 400],
+    ['web-ui.html', 'web-ui.png', 1100, 720],
   ];
   for (const [url, file, width, height] of shots) {
     const page = await browser.newPage();
     await page.setViewport({ width, height, deviceScaleFactor: 2 });
-    await page.goto(`${preview.url}/${url}`, { waitUntil: 'networkidle0' });
-    await page.screenshot({ path: path.join(assets, file), fullPage: true });
+    const webUi = url.startsWith('web-ui');
+    // The web UI's audio players keep the network busy; wait for them to know
+    // their length instead, then mark one line as playing, as on replay.
+    await page.goto(`${preview.url}/${url}`, {
+      waitUntil: webUi ? 'load' : 'networkidle0',
+    });
+    if (webUi) {
+      await page.waitForFunction(
+        () =>
+          document.querySelectorAll('.turn').length > 0 &&
+          [...document.querySelectorAll('audio')].every((a) => a.duration > 0),
+      );
+      await page.evaluate(() =>
+        document.querySelectorAll('.turn')[2].classList.add('now'),
+      );
+    }
+    await page.screenshot({
+      path: path.join(assets, file),
+      fullPage: !webUi,
+    });
     console.log(`Wrote assets/${file}`);
   }
 } finally {

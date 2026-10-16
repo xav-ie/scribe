@@ -7,7 +7,7 @@
 //   assets/logo/mark.svg                      the snail alone, cropped to its bounds
 //   extension/public/icons/icon*.png          the shell, enlarged for the toolbar
 //   the marked blocks in extension/src/popup.css and server/ui.html: the palette
-//   as CSS variables, and the web UI's favicon
+//   as CSS variables, and the web UI's favicon and header mark
 // Run in `nix develop` (node, and ImageMagick with librsvg for the PNGs):
 //   node scripts/assets.mjs
 // CI runs it and fails if anything it writes differs from what's committed.
@@ -163,4 +163,14 @@ fill(
   `\n    <!-- prettier-ignore -->\n    <link rel="icon" type="image/svg+xml" href="${favicon}" />\n    `,
 );
 
-console.log("Wrote the logos, mark, icons, palette blocks and favicon");
+const markUri = `data:image/svg+xml,${encodeURIComponent(read("assets/logo/mark.svg").trim())}`;
+fill(
+  "server/ui.html",
+  "<!-- mark:start -->",
+  "<!-- mark:end -->",
+  `<!-- prettier-ignore --><img alt="" src="${markUri}"/>`,
+);
+
+console.log(
+  "Wrote the logos, mark, icons, palette blocks, favicon and header mark",
+);

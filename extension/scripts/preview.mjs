@@ -69,13 +69,17 @@ const TYPES = {
 
 /**
  * Serve dist/ on a free port. Every HTML page gets the stub for `state()`'s
- * current value; `pages` adds extra HTML routes. Resolves to { url, close }.
+ * current value; `pages` adds extra routes: HTML text, or { type, body } for
+ * anything else. Resolves to { url, close }.
  */
 export async function servePreview(state, pages = {}) {
   const server = createServer((req, res) => {
     const { pathname } = new URL(req.url ?? '/', 'http://localhost');
     if (Object.hasOwn(pages, pathname)) {
-      res.writeHead(200, { 'Content-Type': 'text/html' }).end(pages[pathname]);
+      const page = pages[pathname];
+      const { type, body } =
+        typeof page === 'string' ? { type: 'text/html', body: page } : page;
+      res.writeHead(200, { 'Content-Type': type }).end(body);
       return;
     }
     // The bundled fonts, for extra pages that want them (/fonts/<file>).
