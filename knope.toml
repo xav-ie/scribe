@@ -1,6 +1,6 @@
-# Releases: each change adds a note with `knope document-change` (in nix develop); running
-# Prepare release (.github/workflows/prepare-release.yml, by hand for now) opens a release PR,
-# and merging it builds the extension and publishes it as a GitHub release (release.yml).
+# Releases: each change adds a note with `knope document-change` (in nix develop); every push to
+# main keeps one release PR up to date (.github/workflows/prepare-release.yml), and merging it
+# builds the extension and publishes it as a GitHub release (release.yml).
 
 [package]
 versioned_files = ["extension/package.json"]

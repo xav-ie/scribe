@@ -1,11 +1,13 @@
 name: Prepare release
 
-# Keeps a "chore: prepare release" PR open with the next version and its changelog, built from the
-# change files in .changeset/. Merging it runs release.yml.
+# Keeps one "chore: prepare release" PR open with the next version and its changelog, built from
+# the change files added to .changeset/ since the last release. Each run rebuilds the release
+# branch from main and force-pushes it, so the PR is always rebased and never duplicated.
+# Merging it runs release.yml.
 on:
-  # Manual only until the first release; then add back `push: branches: [main]`
-  # so every push keeps the release PR up to date. Set the version (0.1.0 for
-  # the first release), or leave it empty to compute it from the change files.
+  push:
+    branches: [main]
+  # Run by hand to pick the version yourself, such as 1.0.0.
   workflow_dispatch:
     inputs:
       version:
@@ -45,6 +47,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
         run: |
+          # The first release is 0.1.0. knope would compute 0.0.x from a minor
+          # change on 0.0.0 (or 0.1.1 from 0.1.0), since pre-1.0 versions bump
+          # one place lower; once a tag exists, the change files decide.
+          if [ -z "$VERSION" ] && [ -z "$(git tag --list 'v*')" ]; then VERSION=0.1.0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           knope prepare-release --verbose ${VERSION:+--override-version "$VERSION"}
