@@ -26,6 +26,7 @@ jobs:
       contents: read
     outputs:
       sha: ${{ steps.version.outputs.sha }}
+      version: ${{ steps.version.outputs.version }}
     defaults:
       run:
         working-directory: extension
@@ -48,6 +49,7 @@ jobs:
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           pnpm build
           mkdir -p "$RUNNER_TEMP/artifacts"
           ( cd dist && zip -r "$RUNNER_TEMP/artifacts/meeting-capture-extension-v$VERSION.zip" . )
@@ -80,3 +82,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: knope release --verbose
+
+  # The server image on ghcr.io, as :<version> and :latest.
+  server-image:
+    needs: [extension, release]
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/server-image.yml # zizmor: ignore[self-repository] actionlint rejects the $/ form
+    with:
+      ref: ${{ needs.extension.outputs.sha }}
+      version: ${{ needs.extension.outputs.version }}

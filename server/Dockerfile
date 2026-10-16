@@ -20,6 +20,10 @@ RUN pip install --no-cache-dir uv==0.13.0 \
  && uv sync --frozen --no-dev
 COPY stream_server.py ui.html ./
 
+LABEL org.opencontainers.image.title="scribe" \
+      org.opencontainers.image.description="Live meeting transcription server: NVIDIA Parakeet streaming ASR, web UI and MCP" \
+      org.opencontainers.image.licenses="MIT"
+
 ENV PATH="/app/.venv/bin:$PATH" \
     HOME=/tmp
 EXPOSE 8000
