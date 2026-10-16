@@ -65,7 +65,8 @@ jobs:
       - run: nix run --inputs-from . nixpkgs#hadolint -- server/Dockerfile
       - run: nix run --inputs-from . nixpkgs#uv -- lock --check --directory server
 
-  # The extension icons are build output; fail if they don't match their generator.
+  # The logos, mark, icons, palette blocks and favicon are generated from
+  # assets/logo/snail.svg and assets/palette.json; fail if they've drifted.
   assets:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -76,10 +77,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
-      - name: Regenerate the icons and compare
+      - name: Regenerate and compare
         run: |
-          nix develop --command node extension/scripts/make-icons.mjs
-          git diff --exit-code -- extension/public/icons || { echo "::error::the icons are out of date: run pnpm icons in nix develop and commit the result"; exit 1; }
+          nix develop --command node scripts/assets.mjs
+          git diff --exit-code || { echo "::error::generated assets are out of date: run node scripts/assets.mjs in nix develop and commit the result"; exit 1; }
 
   commit-messages:
     runs-on: ubuntu-latest

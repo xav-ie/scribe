@@ -128,7 +128,7 @@ pnpm check       # runs types + lint + format + knip + unit tests in parallel
 pnpm test        # vitest in watch mode
 pnpm lint        # eslint --fix
 pnpm format      # prettier --write
-pnpm icons       # regenerate icons from the logo's shell (needs ImageMagick `magick` with librsvg)
+# icons, logos and the palette come from ../scripts/assets.mjs (run it in nix develop)
 ```
 
 Stack: pnpm, flat ESLint (typescript-eslint, unicorn, sonarjs, import-x,

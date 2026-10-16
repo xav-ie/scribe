@@ -1,4 +1,4 @@
-import logo from '../../assets/logo/scribe.svg';
+import mark from '../../assets/logo/mark.svg';
 import { BUILD, getSettings, setSettings } from './config';
 import {
   getState,
@@ -19,7 +19,7 @@ const LABELS: Record<RecordingStatus, string> = {
 
 const UNKNOWN = 'Unknown';
 
-$<HTMLElement>('mark').style.backgroundImage = `url(${logo})`;
+$<HTMLElement>('mark').style.backgroundImage = `url(${mark})`;
 const recordBtn = $<HTMLButtonElement>('record');
 const statusEl = $<HTMLSpanElement>('status');
 const micToggle = $<HTMLInputElement>('withMic');

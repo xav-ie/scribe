@@ -99,13 +99,14 @@ const fonts = `
 
 // How the parts connect, left to right, drawn rather than described: the
 // call, the extension's popup, the server, and what reads its sessions.
-// The logo without its background circle, so the snail sits on any card.
-const snail = `url("data:image/svg+xml,${encodeURIComponent(
-  readFileSync(path.join(assets, 'logo', 'scribe.svg'), 'utf8').replace(
-    /<circle cx="256" cy="256" r="256"[^>]*\/>/,
-    '',
-  ),
+// The snail alone (assets/logo/mark.svg) and the palette, both generated from
+// the same sources as everything else by scripts/assets.mjs.
+const mark = `url("data:image/svg+xml,${encodeURIComponent(
+  readFileSync(path.join(assets, 'logo', 'mark.svg'), 'utf8'),
 )}")`;
+const c = JSON.parse(
+  readFileSync(path.join(assets, 'palette.json'), 'utf8'),
+).dark;
 const tile = (color, speaking) => `
   <div class="tile${speaking ? ' speaking' : ''}"><span style="background:${color}"></span>
   ${speaking ? '<i></i><i></i><i></i><i></i>' : ''}</div>`;
@@ -123,12 +124,12 @@ const wave = [10, 22, 36, 18, 44, 28, 52, 30, 40, 16, 34, 24, 12]
   .join('');
 const diagram = `<!doctype html>
 <html><head><meta charset="utf-8"><style>${fonts}
-  body { margin: 0; background: #33200d; color: #fbefe6; font-family: 'Inter', sans-serif; }
+  body { margin: 0; background: ${c.bg}; color: ${c.text}; font-family: 'Inter', sans-serif; }
   .row { width: 1400px; padding: 56px 48px 52px; box-sizing: border-box; display: flex; align-items: center; }
   .step { flex: 0 0 250px; display: flex; flex-direction: column; align-items: center; gap: 18px; }
-  .art { width: 250px; height: 250px; box-sizing: border-box; border-radius: 22px; background: #241608; border: 2px solid #6e4a2c; display: flex; align-items: center; justify-content: center; position: relative; }
+  .art { width: 250px; height: 250px; box-sizing: border-box; border-radius: 22px; background: ${c.surface}; border: 2px solid ${c.line}; display: flex; align-items: center; justify-content: center; position: relative; }
   .step h2 { margin: 0; font-size: 24px; font-weight: 700; }
-  .step p { margin: -10px 0 0; font-size: 16px; color: #ecd0b8; text-align: center; }
+  .step p { margin: -10px 0 0; font-size: 16px; color: ${c.muted}; text-align: center; }
   /* the call */
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 196px; }
   .tile { height: 92px; border-radius: 12px; background: #3c4043; display: grid; place-items: center; position: relative; }
@@ -140,28 +141,28 @@ const diagram = `<!doctype html>
   /* the popup */
   .popup { width: 190px; display: flex; flex-direction: column; gap: 14px; }
   .bar { display: flex; align-items: center; gap: 8px; }
-  .bar .mark { width: 42px; height: 28px; background: ${snail} no-repeat; background-size: 62.5px 62.5px; background-position: -14.4px -19.3px; }
-  .bar .rec { margin-left: auto; padding: 3px 9px; border-radius: 99px; background: #c62818; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+  .bar .mark { width: 42px; height: 29px; background: ${mark} no-repeat center / contain; }
+  .bar .rec { margin-left: auto; padding: 3px 9px; border-radius: 99px; background: ${c.button}; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
   .line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .line b { width: 62px; height: 9px; border-radius: 5px; flex-basis: 100%; max-width: 62px; }
-  .line em { height: 8px; border-radius: 4px; background: #6e4a2c; }
+  .line em { height: 8px; border-radius: 4px; background: ${c.line}; }
   /* the server */
-  .server { border: 3px solid #ff4136; flex-direction: column; gap: 14px; }
-  .server .snail { width: 168px; height: 112px; background: ${snail} no-repeat; background-size: 250px 250px; background-position: -57.6px -77.3px; }
+  .server { border: 3px solid ${c.rec}; flex-direction: column; gap: 14px; }
+  .server .snail { width: 172px; height: 120px; background: ${mark} no-repeat center / contain; }
   .wave { display: flex; align-items: center; gap: 5px; height: 56px; }
-  .wave i { width: 6px; border-radius: 3px; background: #ff4136; opacity: .85; }
+  .wave i { width: 6px; border-radius: 3px; background: ${c.rec}; opacity: .85; }
   /* the tools */
   .tools { flex-direction: column; gap: 14px; align-items: stretch; padding: 0 26px; }
-  .tool { display: flex; align-items: center; gap: 14px; color: #ffc4a8; font-size: 18px; font-weight: 600; }
+  .tool { display: flex; align-items: center; gap: 14px; color: ${c.link}; font-size: 18px; font-weight: 600; }
   .tool svg { width: 44px; height: 44px; flex: none; }
-  .tool span { color: #fbefe6; }
+  .tool span { color: ${c.text}; }
   /* arrows between steps */
   .link { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: 0 14px; margin-top: -60px; }
-  .label { text-align: center; font-size: 15px; font-weight: 600; color: #ffc4a8; }
-  .arrow { height: 0; border-top: 3px dashed #ffc4a8; position: relative; }
+  .label { text-align: center; font-size: 15px; font-weight: 600; color: ${c.link}; }
+  .arrow { height: 0; border-top: 3px dashed ${c.link}; position: relative; }
   .arrow::after { content: ''; position: absolute; top: -9px; border: 8px solid transparent; }
-  .arrow.right::after { right: -4px; border-left: 13px solid #ffc4a8; border-right: 0; }
-  .arrow.left::after { left: -4px; border-right: 13px solid #ffc4a8; border-left: 0; }
+  .arrow.right::after { right: -4px; border-left: 13px solid ${c.link}; border-right: 0; }
+  .arrow.left::after { left: -4px; border-right: 13px solid ${c.link}; border-left: 0; }
 </style></head><body><div class="row">
   <div class="step">
     <div class="art"><div class="grid">${tile('#8e5cd9', true)}${tile('#1f8f6f')}${tile('#c26a1e')}${tile('#3d6fd6')}</div></div>

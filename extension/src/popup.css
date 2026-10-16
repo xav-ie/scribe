@@ -24,21 +24,24 @@
 
 /* The logo's palette: a dark orange-brown ground and a recording red. Every
    text color passes WCAG AA (4.5:1) on --bg and --surface; --rec is for
-   graphics and outlines (4.5:1 on --bg), and white text sits on --accent's
-   darker red instead. Checked by pnpm a11y. */
+   graphics and outlines (4.5:1 on --bg), and white text sits on --button's
+   darker red instead. Checked by pnpm a11y; the values come from
+   assets/palette.json via scripts/assets.mjs. */
 :root {
+  /* palette:start */
   --bg: #33200d;
   --surface: #241608;
+  --line: #6e4a2c;
   --border: #c9936b;
-  --fg: #fbefe6;
+  --text: #fbefe6;
   --muted: #ecd0b8;
   --rec: #ff4136;
-  --accent: #c62818;
+  --button: #c62818;
   --link: #ffc4a8;
   --danger: #ffc4a8;
   --warn: #ffd690;
   --ok: #b5ebb0;
-  --field: var(--surface);
+  /* palette:end */
   --sans: 'Inter', system-ui, -apple-system, sans-serif;
   --mono: 'Maple Mono', ui-monospace, monospace;
   color-scheme: dark;
@@ -55,7 +58,7 @@ body {
   padding: 14px;
   font: 13px/1.4 var(--sans);
   background: var(--bg);
-  color: var(--fg);
+  color: var(--text);
 }
 
 header {
@@ -91,7 +94,7 @@ h2 {
   color: var(--muted);
 }
 .status.recording {
-  background: var(--accent);
+  background: var(--button);
   color: white;
 }
 .status.finalizing {
@@ -106,14 +109,14 @@ button.primary {
   font-weight: 600;
   border: none;
   border-radius: 8px;
-  background: var(--accent);
+  background: var(--button);
   color: white;
   cursor: pointer;
 }
 button.primary.recording {
   background: var(--surface);
   border: 1px solid var(--rec);
-  color: var(--fg);
+  color: var(--text);
 }
 button.primary:disabled {
   opacity: 0.6;
@@ -159,8 +162,8 @@ button.secondary {
   padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: var(--field);
-  color: var(--fg);
+  background: var(--surface);
+  color: var(--text);
   font: 12px var(--mono);
 }
 
@@ -244,12 +247,12 @@ button.secondary {
   margin-bottom: 1px;
 }
 .script .line {
-  color: var(--fg);
+  color: var(--text);
 }
 
 /* Un-attributed running transcript shown before any speaker events arrive. */
 .raw {
-  color: var(--fg);
+  color: var(--text);
   white-space: pre-wrap;
   font-family: var(--mono);
   font-size: 12px;
@@ -307,7 +310,7 @@ body.options-page {
   font-size: 14px;
   text-transform: none;
   letter-spacing: normal;
-  color: var(--fg);
+  color: var(--text);
 }
 .panel p {
   line-height: 1.45;
@@ -335,7 +338,7 @@ button.hidden {
   font-size: 14px;
   text-transform: none;
   letter-spacing: normal;
-  color: var(--fg);
+  color: var(--text);
 }
 .access p {
   margin: 0 0 10px;
@@ -351,15 +354,12 @@ button.hidden {
   font-size: 13px;
 }
 
-/* The logo cropped to the snail (logo units x 118 to 462, y 158 to 390): its
-   circle is the page's own color. 66 px wide is a scale of 66/344. */
+/* The snail alone (assets/logo/mark.svg, cropped to its bounds). */
 .mark {
   flex: none;
   width: 66px;
-  height: 44px;
-  background-size: 98.2px 98.2px;
-  background-position: -22.6px -30.3px;
-  background-repeat: no-repeat;
+  height: 46px;
+  background: no-repeat center / contain;
 }
 header h1 {
   flex: 1;

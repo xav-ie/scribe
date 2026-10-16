@@ -13,7 +13,6 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "icons": "node scripts/make-icons.mjs",
     "check": "concurrently -c auto 'pnpm:check:*'",
     "check:types": "tsc --noEmit",
     "check:lint": "eslint .",
