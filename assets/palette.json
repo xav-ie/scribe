@@ -1,8 +1,8 @@
 {
   "dark": {
-    "bg": "#33200d",
-    "surface": "#241608",
-    "line": "#6e4a2c",
+    "bg": "#1d1711",
+    "surface": "#130f0b",
+    "line": "#4c3929",
     "border": "#c9936b",
     "text": "#fbefe6",
     "muted": "#ecd0b8",

@@ -22,16 +22,16 @@
   src: url('./fonts/maple-mono-latin-700.woff2') format('woff2');
 }
 
-/* The logo's palette: a dark orange-brown ground and a recording red. Every
+/* The logo's palette: a dark, muted brown ground and a recording red. Every
    text color passes WCAG AA (4.5:1) on --bg and --surface; --rec is for
    graphics and outlines (4.5:1 on --bg), and white text sits on --button's
    darker red instead. Checked by pnpm a11y; the values come from
    assets/palette.json via scripts/assets.mjs. */
 :root {
   /* palette:start */
-  --bg: #33200d;
-  --surface: #241608;
-  --line: #6e4a2c;
+  --bg: #1d1711;
+  --surface: #130f0b;
+  --line: #4c3929;
   --border: #c9936b;
   --text: #fbefe6;
   --muted: #ecd0b8;
