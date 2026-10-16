@@ -30,7 +30,7 @@ jobs:
       contents: write # push the release branch
       pull-requests: write # open or update the release PR
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1  # zizmor: ignore[artipacked] knope pushes the release branch with it
         with:
           fetch-depth: 0
       - name: Check for change files

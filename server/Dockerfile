@@ -3,8 +3,8 @@
 # 2.14.0), and its ~3.9 GiB of CUDA wheels live only in podman's store instead
 # of the system closure.
 # Fully qualified, so it builds without unqualified-search-registries set in
-# registries.conf.
-FROM docker.io/library/python:3.12-slim
+# registries.conf, and pinned by digest (Dependabot proposes updates).
+FROM docker.io/library/python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
 # soundfile dlopens libsndfile; ca-certificates for the HF model download.
 # The CUDA stack ships inside the torch/nvidia-* wheels themselves, so a slim
@@ -16,7 +16,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 # [tool.uv] package = false → only the pinned dependencies are installed.
-RUN pip install --no-cache-dir uv \
+RUN pip install --no-cache-dir uv==0.13.0 \
  && uv sync --frozen --no-dev
 COPY stream_server.py ui.html ./
 

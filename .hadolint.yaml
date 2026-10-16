@@ -1,0 +1,4 @@
+# Debian package versions rotate out of the archive, so pinning them breaks
+# builds; the base image is pinned by digest instead.
+ignored:
+  - DL3008

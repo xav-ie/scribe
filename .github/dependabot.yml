@@ -32,3 +32,11 @@ updates:
       # typescript-eslint doesn't support TypeScript 7 yet; revisit when it does.
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+
+  # The server image's base, pinned by digest in server/Dockerfile.
+  - package-ecosystem: docker
+    directory: /server
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
