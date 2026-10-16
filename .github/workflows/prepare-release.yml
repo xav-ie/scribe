@@ -3,9 +3,9 @@ name: Prepare release
 # Keeps a "chore: prepare release" PR open with the next version and its changelog, built from the
 # change files in .changeset/. Merging it runs release.yml.
 on:
-  push:
-    branches: [main]
-  # Run by hand to pick the version yourself, such as 1.0.0.
+  # Manual only until the first release; then add back `push: branches: [main]`
+  # so every push keeps the release PR up to date. Set the version (0.1.0 for
+  # the first release), or leave it empty to compute it from the change files.
   workflow_dispatch:
     inputs:
       version:
