@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import { crx } from '@crxjs/vite-plugin';
-import manifest from './manifest.config';
+import manifest from './manifest.config.ts';
 
 // CRXJS bundles the manifest entry points (service worker + action popup).
 // The offscreen page is NOT a manifest entry point, so it must be declared as

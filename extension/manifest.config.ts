@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { defineManifest } from '@crxjs/vite-plugin';
-import pkg from './package.json';
+import pkg from './package.json' with { type: 'json' };
 
 // Every build says which commit it came from (+dirty for uncommitted changes),
 // so a session record or the popup shows exactly what code was running.
