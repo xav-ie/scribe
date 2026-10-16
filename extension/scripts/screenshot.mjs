@@ -254,9 +254,12 @@ const webUi = readFileSync(
   '<head>',
   () => `<head><script>
   const real = fetch;
-  window.fetch = (url, opts) => String(url).startsWith('/api/sessions/')
-    ? Promise.resolve(new Response(${JSON.stringify(JSON.stringify(session))}))
-    : real(url, opts);
+  window.fetch = (url, opts) =>
+    String(url).startsWith('/api/sessions/')
+      ? Promise.resolve(new Response(${JSON.stringify(JSON.stringify(session))}))
+      : String(url) === '/api/info'
+        ? Promise.resolve(new Response('{"auth":true}'))
+        : real(url, opts);
   location.hash = '#/s/${SID}';
 </script>`,
 );
