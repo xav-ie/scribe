@@ -1,0 +1,546 @@
+{
+  "systems": [
+    {
+      "name": "Raw transcript",
+      "group": "baseline"
+    },
+    {
+      "name": "Rules only",
+      "note": "drop fillers and repeats",
+      "group": "baseline"
+    },
+    {
+      "name": "Stock Gemma 4 E2B",
+      "note": "with a detailed prompt",
+      "size": "2B",
+      "group": "baseline"
+    },
+    {
+      "name": "scribe cleanup v1",
+      "size": "2B",
+      "group": "ours"
+    },
+    {
+      "name": "Simplewords v2",
+      "size": "2B",
+      "link": "https://huggingface.co/ReFyneLabs/simplewords-dictation-cleanup-v2",
+      "group": "dictation"
+    },
+    {
+      "name": "Boswell",
+      "size": "1.7B",
+      "link": "https://huggingface.co/meetboswell/boswell-dictation-cleanup",
+      "group": "dictation"
+    },
+    {
+      "name": "Spokenly Cleanup 1",
+      "size": "0.6B",
+      "link": "https://huggingface.co/spokenly/cleanup-1",
+      "group": "dictation"
+    },
+    {
+      "name": "Sotto",
+      "size": "0.35B",
+      "link": "https://huggingface.co/juanquivilla/sotto-cleanup-lfm25-350m",
+      "group": "dictation"
+    }
+  ],
+  "test": {
+    "windows": {
+      "meetings": 330,
+      "synthetic": 649
+    },
+    "scores": {
+      "Raw transcript": {
+        "meetings": {
+          "wer": 0.0677,
+          "wer_lo": 0.0553,
+          "wer_hi": 0.0852,
+          "fwer": 0.2322,
+          "punct_f1": 0.2439,
+          "caps_f1": 0.5382,
+          "disfl_f1": 0.0,
+          "drop": 0.0001,
+          "neg": 0.0,
+          "num": 0.0,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0
+        },
+        "synthetic": {
+          "wer": 0.094,
+          "wer_lo": 0.0821,
+          "wer_hi": 0.1111,
+          "fwer": 0.2648,
+          "punct_f1": 0.2249,
+          "caps_f1": 0.4782,
+          "disfl_f1": 0.0,
+          "drop": 0.0027,
+          "neg": 0.0,
+          "num": 0.0,
+          "amb": 0.0,
+          "corr": 0.2974,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0
+        }
+      },
+      "Rules only": {
+        "meetings": {
+          "wer": 0.0262,
+          "wer_lo": 0.0213,
+          "wer_hi": 0.0324,
+          "fwer": 0.21,
+          "punct_f1": 0.244,
+          "caps_f1": 0.5955,
+          "disfl_f1": 0.7593,
+          "drop": 0.0001,
+          "neg": 0.0,
+          "num": 0.0,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0
+        },
+        "synthetic": {
+          "wer": 0.0523,
+          "wer_lo": 0.0475,
+          "wer_hi": 0.0583,
+          "fwer": 0.2282,
+          "punct_f1": 0.2251,
+          "caps_f1": 0.6526,
+          "disfl_f1": 0.7259,
+          "drop": 0.0027,
+          "neg": 0.0,
+          "num": 0.0,
+          "amb": 0.0,
+          "corr": 0.2974,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0
+        }
+      },
+      "scribe cleanup v1": {
+        "meetings": {
+          "wer": 0.0168,
+          "wer_lo": 0.0107,
+          "wer_hi": 0.025,
+          "fwer": 0.1407,
+          "punct_f1": 0.5789,
+          "caps_f1": 0.7781,
+          "disfl_f1": 0.8799,
+          "drop": 0.0056,
+          "neg": 0.0,
+          "num": 0.0182,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 0.997,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0049
+        },
+        "synthetic": {
+          "wer": 0.0163,
+          "wer_lo": 0.0104,
+          "wer_hi": 0.0245,
+          "fwer": 0.1275,
+          "punct_f1": 0.6318,
+          "caps_f1": 0.814,
+          "disfl_f1": 0.8981,
+          "drop": 0.0056,
+          "neg": 0.0031,
+          "num": 0.0262,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 0.9954,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0062
+        }
+      }
+    }
+  },
+  "comparison": {
+    "windows": {
+      "meetings": 110,
+      "synthetic": 221
+    },
+    "scores": {
+      "Raw transcript": {
+        "meetings": {
+          "wer": 0.0674,
+          "wer_lo": 0.0548,
+          "wer_hi": 0.0858,
+          "fwer": 0.2305,
+          "punct_f1": 0.2314,
+          "caps_f1": 0.5284,
+          "disfl_f1": 0.0,
+          "drop": 0.0,
+          "neg": 0.0,
+          "num": 0.0,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0
+        },
+        "synthetic": {
+          "wer": 0.0924,
+          "wer_lo": 0.0823,
+          "wer_hi": 0.1066,
+          "fwer": 0.2616,
+          "punct_f1": 0.2275,
+          "caps_f1": 0.4865,
+          "disfl_f1": 0.0,
+          "drop": 0.0025,
+          "neg": 0.0,
+          "num": 0.0,
+          "amb": 0.0,
+          "corr": 0.3303,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0
+        }
+      },
+      "Rules only": {
+        "meetings": {
+          "wer": 0.0267,
+          "wer_lo": 0.0202,
+          "wer_hi": 0.0352,
+          "fwer": 0.208,
+          "punct_f1": 0.2314,
+          "caps_f1": 0.5928,
+          "disfl_f1": 0.7625,
+          "drop": 0.0,
+          "neg": 0.0,
+          "num": 0.0,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0
+        },
+        "synthetic": {
+          "wer": 0.0502,
+          "wer_lo": 0.0449,
+          "wer_hi": 0.0554,
+          "fwer": 0.224,
+          "punct_f1": 0.2277,
+          "caps_f1": 0.659,
+          "disfl_f1": 0.7329,
+          "drop": 0.0025,
+          "neg": 0.0,
+          "num": 0.0,
+          "amb": 0.0,
+          "corr": 0.3303,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0
+        }
+      },
+      "Stock Gemma 4 E2B": {
+        "meetings": {
+          "wer": 0.0535,
+          "wer_lo": 0.0431,
+          "wer_hi": 0.0687,
+          "fwer": 0.2369,
+          "punct_f1": 0.1982,
+          "caps_f1": 0.4825,
+          "disfl_f1": 0.5987,
+          "drop": 0.0214,
+          "neg": 0.0,
+          "num": 0.0455,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 0.9273,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0818
+        },
+        "synthetic": {
+          "wer": 0.0793,
+          "wer_lo": 0.071,
+          "wer_hi": 0.0868,
+          "fwer": 0.2719,
+          "punct_f1": 0.1594,
+          "caps_f1": 0.4813,
+          "disfl_f1": 0.5903,
+          "drop": 0.0192,
+          "neg": 0.009,
+          "num": 0.1312,
+          "amb": 0.0362,
+          "corr": 0.3032,
+          "struct": 0.9412,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0755
+        }
+      },
+      "scribe cleanup v1": {
+        "meetings": {
+          "wer": 0.0133,
+          "wer_lo": 0.0091,
+          "wer_hi": 0.0198,
+          "fwer": 0.1335,
+          "punct_f1": 0.5807,
+          "caps_f1": 0.7833,
+          "disfl_f1": 0.8813,
+          "drop": 0.0052,
+          "neg": 0.0,
+          "num": 0.0273,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0042
+        },
+        "synthetic": {
+          "wer": 0.0203,
+          "wer_lo": 0.0097,
+          "wer_hi": 0.0405,
+          "fwer": 0.1321,
+          "punct_f1": 0.6328,
+          "caps_f1": 0.8161,
+          "disfl_f1": 0.9013,
+          "drop": 0.0064,
+          "neg": 0.0045,
+          "num": 0.0181,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 0.991,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0095
+        }
+      },
+      "Simplewords v2": {
+        "meetings": {
+          "wer": 0.1595,
+          "wer_lo": 0.1362,
+          "wer_hi": 0.1802,
+          "fwer": 0.2958,
+          "punct_f1": 0.4578,
+          "caps_f1": 0.6155,
+          "disfl_f1": 0.4067,
+          "drop": 0.1137,
+          "neg": 0.2909,
+          "num": 0.2364,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0878
+        },
+        "synthetic": {
+          "wer": 0.1579,
+          "wer_lo": 0.1384,
+          "wer_hi": 0.1761,
+          "fwer": 0.2814,
+          "punct_f1": 0.5265,
+          "caps_f1": 0.6781,
+          "disfl_f1": 0.4627,
+          "drop": 0.0993,
+          "neg": 0.2986,
+          "num": 0.4118,
+          "amb": 0.0045,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.07
+        }
+      },
+      "Boswell": {
+        "meetings": {
+          "wer": 0.2297,
+          "wer_lo": 0.1966,
+          "wer_hi": 0.2775,
+          "fwer": 0.3716,
+          "punct_f1": 0.3994,
+          "caps_f1": 0.6187,
+          "disfl_f1": 0.2641,
+          "drop": 0.1549,
+          "neg": 0.2273,
+          "num": 0.3636,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0091,
+          "revert_after_guards": 0.1077
+        },
+        "synthetic": {
+          "wer": 0.2321,
+          "wer_lo": 0.2127,
+          "wer_hi": 0.2555,
+          "fwer": 0.3656,
+          "punct_f1": 0.4663,
+          "caps_f1": 0.6721,
+          "disfl_f1": 0.293,
+          "drop": 0.1491,
+          "neg": 0.2443,
+          "num": 0.7421,
+          "amb": 0.0,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.009,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0045,
+          "revert_after_guards": 0.1408
+        }
+      },
+      "Spokenly Cleanup 1": {
+        "meetings": {
+          "wer": 0.0955,
+          "wer_lo": 0.0747,
+          "wer_hi": 0.1193,
+          "fwer": 0.2646,
+          "punct_f1": 0.4122,
+          "caps_f1": 0.6182,
+          "disfl_f1": 0.5628,
+          "drop": 0.0447,
+          "neg": 0.0182,
+          "num": 0.1182,
+          "amb": 0.0364,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0269
+        },
+        "synthetic": {
+          "wer": 0.1125,
+          "wer_lo": 0.0967,
+          "wer_hi": 0.1277,
+          "fwer": 0.2611,
+          "punct_f1": 0.4736,
+          "caps_f1": 0.6856,
+          "disfl_f1": 0.6037,
+          "drop": 0.0482,
+          "neg": 0.0317,
+          "num": 0.5656,
+          "amb": 0.3891,
+          "corr": 0.0045,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.121
+        }
+      },
+      "Sotto": {
+        "meetings": {
+          "wer": 0.1426,
+          "wer_lo": 0.118,
+          "wer_hi": 0.1719,
+          "fwer": 0.2961,
+          "punct_f1": 0.4136,
+          "caps_f1": 0.6148,
+          "disfl_f1": 0.4699,
+          "drop": 0.085,
+          "neg": 0.1091,
+          "num": 0.2455,
+          "amb": 0.0091,
+          "corr": 0.0,
+          "struct": 1.0,
+          "num_after_guards": 0.0,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.0636
+        },
+        "synthetic": {
+          "wer": 0.1386,
+          "wer_lo": 0.1259,
+          "wer_hi": 0.1518,
+          "fwer": 0.2795,
+          "punct_f1": 0.4721,
+          "caps_f1": 0.6739,
+          "disfl_f1": 0.5076,
+          "drop": 0.0813,
+          "neg": 0.1131,
+          "num": 0.7602,
+          "amb": 0.2896,
+          "corr": 0.0271,
+          "struct": 1.0,
+          "num_after_guards": 0.009,
+          "amb_after_guards": 0.0,
+          "neg_after_guards": 0.0,
+          "revert_after_guards": 0.1609
+        }
+      }
+    }
+  },
+  "reviewed": {
+    "lines": 150,
+    "status": "the correct answers were checked against the rules by an AI (Claude), then a person checked 30 at random and agreed with all 30",
+    "scores": {
+      "Raw transcript": {
+        "wer": 0.0753,
+        "wer_lo": 0.0604,
+        "wer_hi": 0.0924,
+        "fwer": 0.2183,
+        "punct_f1": 0.356,
+        "caps_f1": 0.6711,
+        "disfl_f1": 0.0,
+        "drop": 0.0,
+        "neg": 0.0,
+        "num": 0.0
+      },
+      "Rules only": {
+        "wer": 0.0386,
+        "wer_lo": 0.0298,
+        "wer_hi": 0.0466,
+        "fwer": 0.2042,
+        "punct_f1": 0.356,
+        "caps_f1": 0.6886,
+        "disfl_f1": 0.6602,
+        "drop": 0.0,
+        "neg": 0.0,
+        "num": 0.0
+      },
+      "scribe cleanup v1": {
+        "wer": 0.0206,
+        "wer_lo": 0.0128,
+        "wer_hi": 0.0293,
+        "fwer": 0.1414,
+        "punct_f1": 0.6076,
+        "caps_f1": 0.7814,
+        "disfl_f1": 0.8179,
+        "drop": 0.006,
+        "neg": 0.0,
+        "num": 0.0
+      }
+    }
+  }
+}

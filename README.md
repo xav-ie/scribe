@@ -33,6 +33,7 @@ searchable by you and by your AI agents.
 |---|---|
 | The browser extension | Chrome or another Chromium browser on your computer, including a Mac, with Google Meet or Zoom open in the browser |
 | The scribe server (speech-to-text) | a Mac with Apple silicon ([natively](#on-a-mac)), or a Linux machine with an NVIDIA GPU (in a container). It doesn't have to be the computer you take calls on: one server on your network can serve every laptop (see [Configuration](#configuration)) |
+| The optional [cleanup model](models/README.md) | an NVIDIA GPU, or a Mac with an Apple chip |
 
 English only, for now.
 
@@ -284,6 +285,15 @@ meetings, and an original/cleaned switch; agents read the cleaned copy with `get
 with `clean_transcript`. Every cleaned line passes the model's [safety check](models/cleanup/guard.py) first: where the
 model changed a number, a "not", a speaker or a timestamp, the line stays as spoken, and the page says how many did.
 
+## Models
+
+scribe turns speech into text with NVIDIA Parakeet, live. Alongside it, **scribe cleanup v1** is an optional small
+model that tidies a finished transcript: it removes ums and false starts and fixes punctuation, while keeping every
+other word, every speaker and timestamp, and every number. It runs on your own computer (about 3 minutes for an
+hour-long meeting on a Mac), and the original transcript always stays the record; [the server runs it for
+you](#optional-cleanup) when you point it at one. See [models/](models/README.md) for how to use it, how it was built,
+and how it compares with other models.
+
 ## Development
 
 ```sh
@@ -293,6 +303,7 @@ pytest server/tests          # the server's tests on their own (no GPU: the ML s
 cd extension && pnpm i && pnpm check && pnpm build
 pnpm screenshot               # regenerate the README images
 node scripts/assets.mjs       # regenerate logos, icons and palette blocks (repo root, nix develop)
+node scripts/diagrams.mjs     # regenerate model doc diagrams, charts and tables (repo root, nix develop)
 knope document-change         # note a change for the next release (from the repo root)
 ```
 
