@@ -1,3 +1,17 @@
+## 0.1.1 (2026-10-20)
+
+### Features
+
+#### Wyoming speech to text for Home Assistant
+
+Set `SCRIBE_WYOMING` to a host and port (e.g. `0.0.0.0:10300`) and scribe also serves the Wyoming protocol, so Home Assistant's voice assistants can use it for speech to text. Commands are boosted with the vocabulary, like the OpenAI-compatible endpoint.
+
+### Fixes
+
+#### Cleanup cuts recognition loops first
+
+When speech-to-text repeats a word or short phrase 5 or more times in a row ("two two two ..."), scribe now cuts the run to one copy before the cleanup model sees it, as the model was trained to. A long loop could make the model repeat it instead, which left the whole chunk uncleaned. A line the safety check keeps still shows what was said, loop and all.
+
 ## 0.1.0 (2026-10-20)
 
 ### Features
