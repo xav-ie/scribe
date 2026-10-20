@@ -19,7 +19,7 @@
 
 import type { RecState } from './state';
 import type { Message } from './types';
-import { applyWords, type Word } from './transcript';
+import { applyWords, type SpeakerSpan, type Word } from './transcript';
 
 // The PCM tap worklet module (public/pcm-worklet.js, copied to the dist root).
 const WORKLET_URL = 'pcm-worklet.js';
@@ -60,6 +60,8 @@ interface StreamOpts {
   boost: string[];
   /** The server's access token, sent in each stream's first message. */
   token?: string;
+  /** Who the mic stream's words are attributed to. */
+  micSpeaker: string;
 }
 
 let session: Session | null = null;
@@ -89,6 +91,14 @@ const SILENT_MIC_SECONDS = 20;
 // How long a stopped stream waits for the server's last words.
 const FLUSH_TIMEOUT_MS = 5000;
 let captureTabId: number | null = null;
+// The recording's speaker timeline, sent on the tab stream for the server's
+// live view. Kept outside the session: spans arrive while start() is still
+// opening the capture, and the socket sends them all once it opens.
+let timeline: SpeakerSpan[] = [];
+let timelineFor: string | null = null;
+
+const sendSpan = (ws: WebSocket, span: SpeakerSpan): void =>
+  ws.send(JSON.stringify({ speaker: span.name, from: span.from }));
 const micMuted = (): boolean =>
   captureTabId !== null && mutedByTab.get(captureTabId) === true;
 
@@ -237,6 +247,11 @@ function openChannel(
         token: stream.token,
       }),
     );
+    if (channelName === 'tab') {
+      for (const span of timeline) sendSpan(ws, span);
+    } else {
+      sendSpan(ws, { name: stream.micSpeaker, from: 0 });
+    }
     if (debug) {
       console.log(`[offscreen] ${channelName} ws open @ ${ctx.sampleRate} Hz`);
     }
@@ -428,12 +443,19 @@ function removeMic(): void {
 }
 
 async function start(
-  opts: StreamOpts & { streamId: string; withMic: boolean; tabId: number },
+  opts: StreamOpts & {
+    streamId: string;
+    withMic: boolean;
+    tabId: number;
+    timeline: SpeakerSpan[];
+  },
 ): Promise<void> {
   if (session) return;
   const gen = ++generation;
   captureTabId = opts.tabId;
   micWanted = opts.withMic;
+  timeline = [...opts.timeline];
+  timelineFor = opts.sessionId;
 
   // Opened here before the session owns them, so a failure or a stop midway
   // releases them too.
@@ -469,6 +491,7 @@ async function start(
       sessionId: opts.sessionId,
       saveAudio: opts.saveAudio,
       boost: opts.boost,
+      micSpeaker: opts.micSpeaker,
     };
     session = {
       ctx,
@@ -522,6 +545,15 @@ async function teardown(flush = false): Promise<void> {
   await Promise.all(closing);
 }
 
+// A new active speaker: on the tab stream now if its socket is open, else once
+// it opens.
+function addSpan(sessionId: string, span: SpeakerSpan): void {
+  if (sessionId !== timelineFor) return;
+  timeline.push(span);
+  const ws = session?.tab.ws;
+  if (ws?.readyState === WebSocket.OPEN) sendSpan(ws, span);
+}
+
 chrome.runtime.onMessage.addListener((message: Message, sender) => {
   if (message.target !== 'offscreen') return;
   switch (message.type) {
@@ -546,6 +578,10 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
         removeMic();
         void addMic();
       }
+      break;
+    }
+    case 'SPEAKER_SPAN': {
+      addSpan(message.sessionId, message.span);
       break;
     }
     case 'MUTE_STATE': {

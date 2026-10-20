@@ -222,6 +222,9 @@
       .turn:hover {
         background: var(--surface);
       }
+      .live .turn {
+        cursor: default;
+      }
       .turn.now {
         background: color-mix(in srgb, var(--rec) 16%, var(--bg));
         box-shadow: inset 3px 0 var(--rec);
@@ -701,19 +704,84 @@
         return bar;
       }
 
+      // The extension's join (extension/src/transcript.ts): each word is
+      // stamped with its wall-clock time and given whoever its stream's
+      // timeline says was talking a little later, when the meeting's
+      // active-speaker indicator had caught up; runs of one speaker make a turn.
+      const SPEAKER_LEAD_MS = 900;
+      function liveTurns(streams) {
+        const stamped = [];
+        for (const s of streams) {
+          if (s.epoch == null) continue;
+          for (const w of s.words) {
+            const at = s.epoch + ((w.start + w.end) / 2) * 1000;
+            let speaker = "Unknown";
+            for (const span of s.speakers) {
+              if (span.from > at + SPEAKER_LEAD_MS) break;
+              speaker = span.name;
+            }
+            stamped.push({ at, speaker, word: w.word });
+          }
+        }
+        stamped.sort((a, b) => a.at - b.at);
+        const turns = [];
+        for (const s of stamped) {
+          const last = turns.at(-1);
+          if (last?.speaker === s.speaker) last.text += ` ${s.word}`;
+          else turns.push({ speaker: s.speaker, at: s.at, text: s.word });
+        }
+        return turns;
+      }
+
       // A session still recording: follow its streams over /ws/watch, applying
       // each {"type": "words", "from", "words"} update the way the extension
-      // does (replace from index `from` on). Once every stream has closed, the
-      // saved session is loaded in its place.
+      // does (replace from index `from` on) and joining the words with each
+      // stream's clock and speakers into turns. Once every stream has closed,
+      // the saved session is loaded in its place.
       let watching = null;
       function watchLive(id) {
-        const streams = new Map(); // stream id -> { channel, words, pre }
-        const box = el("div");
+        // stream id -> { words, epoch, speakers, open }
+        const streams = new Map();
+        const box = el("div", { className: "live" });
         const status = el("p", {
           className: "muted",
           textContent: "● recording, live",
         });
         app.replaceChildren(status, box);
+        let drawing = false;
+        const draw = () => {
+          if (drawing) return;
+          drawing = true;
+          requestAnimationFrame(() => {
+            drawing = false;
+            const turns = liveTurns([...streams.values()]);
+            const origin = turns[0]?.at ?? 0;
+            box.replaceChildren(
+              ...turns.map((turn) =>
+                el(
+                  "div",
+                  { className: "turn" },
+                  el("div", {
+                    className: "t",
+                    textContent: clock((turn.at - origin) / 1000),
+                  }),
+                  el(
+                    "div",
+                    {},
+                    Object.assign(
+                      el("div", {
+                        className: "who",
+                        textContent: turn.speaker,
+                      }),
+                      { style: `color:${color(turn.speaker)}` },
+                    ),
+                    el("div", { textContent: turn.text }),
+                  ),
+                ),
+              ),
+            );
+          });
+        };
         let over = false;
         const ended = () => {
           over = true;
@@ -727,18 +795,25 @@
         watching = ws;
         ws.onmessage = (event) => {
           const msg = JSON.parse(event.data);
+          let s = msg.stream && streams.get(msg.stream);
+          if (msg.stream && !s) {
+            s = { words: [], epoch: null, speakers: [], open: true };
+            streams.set(msg.stream, s);
+          }
           if (msg.type === "words") {
-            let s = streams.get(msg.stream);
-            if (!s) {
-              s = { channel: msg.channel, words: [], pre: el("pre") };
-              streams.set(msg.stream, s);
-              box.append(el("h2", { textContent: msg.channel }), s.pre);
-            }
             s.words.splice(msg.from, Infinity, ...msg.words);
-            s.pre.textContent = s.words.map((w) => w.word).join(" ");
+            draw();
+          } else if (msg.type === "epoch") {
+            s.epoch = msg.epoch;
+            draw();
+          } else if (msg.type === "speaker") {
+            s.speakers.push({ name: msg.name, from: msg.from });
+            s.speakers.sort((a, b) => a.from - b.from);
+            draw();
           } else if (msg.type === "closed") {
-            streams.delete(msg.stream);
-            if (streams.size === 0) ended();
+            // Its words stay on screen: the mic can be dropped mid-recording.
+            s.open = false;
+            if (![...streams.values()].some((x) => x.open)) ended();
           } else if (msg.type === "idle") {
             ended();
           }
