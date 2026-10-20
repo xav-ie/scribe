@@ -32,6 +32,9 @@ turn it into clean, readable text without changing what anyone said.
 - **An OpenAI-compatible transcription API.** `POST /v1/audio/transcriptions`
   puts the same model behind any dictation tool that speaks the OpenAI API,
   with the token as its API key.
+- **Home Assistant voice.** Set `SCRIBE_WYOMING` (e.g. `0.0.0.0:10300`) and
+  add it to Home Assistant's Wyoming integration to use scribe as the speech
+  to text of a voice assistant.
 
 ## What you need
 
@@ -272,6 +275,11 @@ boosting strength, where recordings and the vocabulary live, the access token
 (`SCRIBE_TOKEN_FILE`, or `SCRIBE_TOKEN` as an escape hatch),
 `SCRIBE_ALLOWED_HOSTS`, and the [optional cleanup](#optional-cleanup)
 (`SCRIBE_CLEANUP_URL`, `SCRIBE_CLEANUP_MODEL`, `SCRIBE_CLEANUP_AUTO`).
+
+`SCRIBE_WYOMING` turns on a [Wyoming](https://github.com/OHF-Voice/wyoming)
+speech-to-text server at that address. Wyoming has no authentication, so
+expose it only to Home Assistant (in a container, publish it on
+`127.0.0.1` only).
 
 Without a token the server is open to anyone who can reach it, and the web UI
 and extension say so. When it leaves your machine, serve it over HTTPS so the
