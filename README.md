@@ -27,6 +27,15 @@ searchable by you and by your AI agents.
   puts the same model behind any dictation tool that speaks the OpenAI API,
   with the token as its API key.
 
+## What you need
+
+| Part | Runs on |
+|---|---|
+| The browser extension | Chrome or another Chromium browser on your computer, including a Mac, with Google Meet or Zoom open in the browser |
+| The scribe server (speech-to-text) | a Mac with Apple silicon ([natively](#on-a-mac)), or a Linux machine with an NVIDIA GPU (in a container). It doesn't have to be the computer you take calls on: one server on your network can serve every laptop (see [Configuration](#configuration)) |
+
+English only, for now.
+
 ## How it works
 
 ![The meeting tab feeds audio and the active speaker to the extension, which streams audio to the scribe server over a WebSocket and gets words with timestamps back; the server's sessions are available to the web UI, MCP agents and the OpenAI-compatible API](assets/how-it-works.png)
@@ -44,14 +53,12 @@ a bot, and charge per seat. scribe is the opposite on all three:
   nobody has to admit a "notetaker" into the meeting.
 - **Open and yours:** MIT licensed, with transcripts in plain JSON on your disk.
 
-**Current limits:** English only, Chrome (or another Chromium) with Google Meet
-or Zoom in the browser, and an NVIDIA GPU for the server.
-
 ## Quick start
 
-You need a Linux machine with an NVIDIA GPU (about 2.6 GB of GPU memory and
-10 GB of disk) with the NVIDIA container toolkit, and Chrome or another
-Chromium browser.
+You need Chrome or another Chromium browser, and for the server either a Linux
+machine with an NVIDIA GPU (about 2.6 GB of GPU memory and 10 GB of disk) with
+the NVIDIA container toolkit, or a Mac with Apple silicon (about 4 GB of free
+memory and 5 GB of disk; [see below](#on-a-mac)).
 
 1. **Run the server.** It reads its access token from a file; the model
    downloads on first start.
@@ -65,6 +72,7 @@ Chromium browser.
 
    Or `docker compose up -d` with this repository's [`compose.yaml`](compose.yaml).
    With podman, use `--device nvidia.com/gpu=all` instead of `--gpus all`.
+   On a Mac, run it [natively](#on-a-mac) instead.
 
 2. **Install the extension.** Download `meeting-capture-extension-*.zip` from
    the [latest release](https://github.com/xav-ie/scribe/releases/latest) and
@@ -78,6 +86,27 @@ Chromium browser.
 
 Recording laws differ by place, and some require everyone's consent: check
 yours, and tell people when you're recording them.
+
+### On a Mac
+
+Docker on macOS can't reach the GPU, so on Apple silicon the server runs
+natively, on the Mac's GPU (Metal), with the same model, decoding and
+boosting as on NVIDIA. With [uv](https://docs.astral.sh/uv/) installed
+(`brew install uv`):
+
+```sh
+git clone https://github.com/xav-ie/scribe
+scribe/server/run.sh
+```
+
+The first run installs the pinned Python environment (1.5 GB) and downloads the
+model (2.4 GB). The server listens on `http://localhost:8000` and keeps its
+access token, recordings and vocabulary in `~/.local/share/scribe` (set
+`SCRIBE_DATA` to move them); log in with the token from
+`~/.local/share/scribe/token` and pair the extension as in step 2.
+
+On an M5 it transcribes about 10 times faster than real time and captions arrive about
+as fast as on an NVIDIA GPU; it uses about 4 GB of memory while running.
 
 ## After the meeting
 
@@ -201,7 +230,9 @@ final update and `{"type": "done"}`.
 ### Configuration
 
 Environment variables, documented at the top of
-[`server/stream_server.py`](server/stream_server.py): the model, context sizes,
+[`server/stream_server.py`](server/stream_server.py): the device
+(`SCRIBE_DEVICE`: `cuda`, `mps` or `cpu`; by default the GPU it finds, and the
+CPU, far slower than real time, only when asked for), the model, context sizes,
 boosting strength, where recordings and the vocabulary live, the access token
 (`SCRIBE_TOKEN_FILE`, or `SCRIBE_TOKEN` as an escape hatch) and
 `SCRIBE_ALLOWED_HOSTS`.

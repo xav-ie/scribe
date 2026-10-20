@@ -15,6 +15,8 @@ context and greedily decodes only the chunk, carrying the decoder state over.
 Decoded tokens are never revised, so every word sent is final.
 
 Tunables (set by the Nix module via env):
+  SCRIBE_DEVICE       cuda, mps (Apple silicon) or cpu; default the first GPU
+                      found, CUDA before MPS, and never the CPU by itself
   SCRIBE_MODEL        HF model id (default nvidia/parakeet-unified-en-0.6b)
   SCRIBE_LEFT_S       left context seconds (default 5.6)
   SCRIBE_CHUNK_S      chunk seconds (default 0.56); a step runs every chunk
@@ -64,6 +66,7 @@ import logging
 import math
 import os
 import re
+import sys
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -108,12 +111,41 @@ nemo_logging.set_verbosity(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-# GPU-only service: fail loudly rather than silently crawl on CPU.
-if not torch.cuda.is_available():
+
+def _pick_device(requested, cuda, mps):
+    """The torch device to run on: SCRIBE_DEVICE when set, else an NVIDIA GPU,
+    else Apple silicon's GPU (Metal). The CPU only when asked for: it would
+    rather fail loudly than silently crawl."""
+    if requested:
+        if requested not in ("cuda", "mps", "cpu"):
+            raise RuntimeError(
+                f"scribe: SCRIBE_DEVICE {requested!r} is not cuda, mps or cpu"
+            )
+        if (requested == "cuda" and not cuda) or (requested == "mps" and not mps):
+            raise RuntimeError(
+                f"scribe: SCRIBE_DEVICE={requested} but it isn't available"
+            )
+        return requested
+    if cuda:
+        return "cuda"
+    if mps:
+        return "mps"
     raise RuntimeError(
-        "scribe: no CUDA GPU visible to the container; refusing to run on CPU"
+        "scribe: no GPU visible (CUDA or Apple MPS); set SCRIBE_DEVICE=cpu to run "
+        "on the CPU anyway"
     )
-print(f"[scribe] CUDA ready: {torch.cuda.get_device_name(0)}", flush=True)
+
+
+DEVICE = _pick_device(
+    os.environ.get("SCRIBE_DEVICE"),
+    torch.cuda.is_available(),
+    torch.backends.mps.is_available(),
+)
+print(
+    f"[scribe] {DEVICE} ready"
+    + (f": {torch.cuda.get_device_name(0)}" if DEVICE == "cuda" else ""),
+    flush=True,
+)
 
 SAMPLE_RATE = 16000
 # Source rates scribe resamples from; anything else is refused. An arbitrary
@@ -155,8 +187,9 @@ def _load_model():
     # stranded in PyTorch's cache on a card shared with other services.
     model = nemo_asr.models.ASRModel.from_pretrained(MODEL_ID, map_location="cpu")
     model.freeze()
-    model = model.to(torch.bfloat16).cuda()
-    torch.cuda.empty_cache()
+    model = model.to(torch.bfloat16).to(DEVICE)
+    if DEVICE == "cuda":
+        torch.cuda.empty_cache()
 
     cfg = OmegaConf.structured(RNNTDecodingConfig())  # greedy_batch + label looping
     with open_dict(cfg):
@@ -178,7 +211,8 @@ model = _load_model()
 # Loading frees the CPU-side fp32 weights and checkpoint (~4 GB), but glibc keeps
 # the freed heap mapped; hand it back to the OS.
 gc.collect()
-ctypes.CDLL("libc.so.6").malloc_trim(0)
+if sys.platform == "linux":
+    ctypes.CDLL("libc.so.6").malloc_trim(0)
 decoding_computer = model.decoding.decoding.decoding_computer
 # Boosting's Triton kernels compile at run time with a C compiler and
 # /sbin/ldconfig, which the Nix image doesn't have; use the PyTorch path.
@@ -307,7 +341,7 @@ class StreamState:
 
     def __init__(self):
         self.buffer = StreamingBatchedAudioBuffer(
-            batch_size=1, context_samples=CTX, dtype=torch.float32, device="cuda"
+            batch_size=1, context_samples=CTX, dtype=torch.float32, device=DEVICE
         )
         self.decoder_state = None
         self.pending = np.empty(
@@ -321,7 +355,7 @@ class StreamState:
         self.boundary = False  # a bare ▁ token arrived: the next piece starts a word
         # This stream's boosting model in the decoder (-1: none).
         self.boost_id = -1
-        self.boost_ids = torch.tensor([-1], device="cuda")
+        self.boost_ids = torch.tensor([-1], device=DEVICE)
 
     def set_boost(self, phrases):
         """Boost these phrases for the rest of the stream. Blocking — via to_thread."""
@@ -338,7 +372,7 @@ class StreamState:
             biasing_multi_model=decoding_computer.biasing_multi_model,
         )
         self.boost_id = request.multi_model_id
-        self.boost_ids = torch.tensor([self.boost_id], device="cuda")
+        self.boost_ids = torch.tensor([self.boost_id], device=DEVICE)
 
     def close(self):
         if self.boost_id >= 0:
@@ -351,12 +385,12 @@ class StreamState:
     def step(self, audio_16k, last=False):
         """Decode one chunk. Blocking — call via to_thread."""
         n = audio_16k.shape[0]
-        audio = torch.from_numpy(audio_16k).unsqueeze(0).cuda()
-        last_b = torch.tensor([last], device="cuda")
+        audio = torch.from_numpy(audio_16k).unsqueeze(0).to(DEVICE)
+        last_b = torch.tensor([last], device=DEVICE)
         with torch.inference_mode():
             self.buffer.add_audio_batch_(
                 audio,
-                audio_lengths=torch.tensor([n], device="cuda"),
+                audio_lengths=torch.tensor([n], device=DEVICE),
                 is_last_chunk=last,
                 is_last_chunk_batch=last_b,
             )
