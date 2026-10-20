@@ -157,8 +157,8 @@ describe('grantServerAccess', () => {
 
 describe('getSettings', () => {
   it('fills in defaults around what was stored', async () => {
-    chromeStub.sync.set('withMic', true);
-    expect(await getSettings()).toEqual({ ...DEFAULT_SETTINGS, withMic: true });
+    chromeStub.sync.set('debug', true);
+    expect(await getSettings()).toEqual({ ...DEFAULT_SETTINGS, debug: true });
   });
 });
 

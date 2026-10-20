@@ -8,8 +8,6 @@ export const BUILD =
 export interface Settings {
   /** WebSocket URL of the scribe server, set on the options page. Empty until then. */
   wsUrl: string;
-  /** Capture the user's microphone alongside the tab audio. */
-  withMic: boolean;
   /** Log active-speaker detection + streaming diagnostics to the console. */
   debug: boolean;
   /** Ask the streaming service to keep the audio it receives, per session. */
@@ -18,7 +16,6 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   wsUrl: '',
-  withMic: false,
   debug: false,
   saveAudio: false,
 };

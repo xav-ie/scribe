@@ -48,7 +48,7 @@ window.chrome = {
     getURL: (p) => p,
   },
   storage: {
-    sync: { get: async (d) => ({ ...d, withMic: true, wsUrl: ${JSON.stringify(wsUrl)} }), set: async () => {} },
+    sync: { get: async (d) => ({ ...d, wsUrl: ${JSON.stringify(wsUrl)} }), set: async () => {} },
     local: { get: async () => ({ recState: ${JSON.stringify(recState)} }) },
     onChanged: { addListener() {} },
   },

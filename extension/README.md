@@ -44,7 +44,7 @@ flowchart LR
         asr["streaming ASR<br/>(words + timestamps)"]
     end
 
-    pop -- "start / stop / mic / debug" --> sw
+    pop -- "start / stop / debug" --> sw
     sw -- "tab stream id" --> off
     off == "WS: int16 PCM frames" ==> asr
     asr == "{ type: words, from, words:[{word,start,end}] }" ==> off
@@ -72,7 +72,7 @@ tuning (see below).
   `chrome.storage.local` so it survives the worker being torn down).
 - **`src/offscreen.ts`** + **`public/pcm-worklet.js`** — the capture engine. Wires
   an `AudioContext` graph, taps PCM on the audio thread with an `AudioWorklet`,
-  and streams it over a WebSocket. The mic can be added/removed **mid-recording**.
+  and streams it over a WebSocket. Your mic is always its own stream.
 - **`src/speaker/`** — the active-speaker scraper (content script). `meet.ts` and
   `zoom.ts` are per-platform adapters; `index.ts` wires the matching one and
   reports changes; `transcript.ts` holds the timestamp-join logic.
@@ -161,7 +161,7 @@ install.
 ## Service contract
 
 The extension opens one WebSocket per stream (the tab, and the mic when it's
-on) and speaks the protocol described in the
+granted) and speaks the protocol described in the
 [top-level README](../README.md#streaming-protocol): a JSON hello with the
 sample rate, session id, channel, whether to save audio and the participants'
 names to boost, then int16 PCM; the server streams back word updates that
@@ -175,9 +175,8 @@ later if that fails.
 
 1. Start the streaming ASR service and make its URL reachable from the browser.
 2. Join a meeting in a Chrome tab (Google Meet or Zoom web).
-3. Click the extension icon → optionally **Capture my microphone** (grant once
-   via `grant access`; it can also be toggled live mid-recording) → **Start
-   recording**.
+3. Click the extension icon → **Start recording**. Your mic is always recorded
+   (grant it once via `grant access`), except while you're muted in the meeting.
 4. Watch the transcript fill in, grouped by speaker. **Stop** when done.
 
 ---
@@ -188,7 +187,7 @@ later if that fails.
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Everyone shows as **`Unknown`**         | The active-speaker scraper isn't firing. Reload the extension **and refresh the meeting tab**; with Debug on, check the meeting tab console. If Meet rotated its DOM, the `[data-participant-id]`/name selectors in `speaker/meet.ts` may need a tweak. |
 | Can't hear the meeting while recording  | Tab capture mutes the tab; the offscreen doc reconnects `tabSource → ctx.destination` to keep playback. If broken, that's the line to check.                                                                                                            |
-| No mic in the recording                 | Allow it under Microphone on the settings page (the popup's `grant access` link opens it); also check OS-level mic permission for Chrome. The live toggle no-ops until granted.                                                                         |
+| No mic in the recording                 | Allow it under Microphone on the settings page (the popup's `grant access` link opens it); also check OS-level mic permission for Chrome.                                                                                                               |
 | Audio freezes/gaps mid-recording        | You switched away from the meeting tab; Chrome throttles background tabs. Stay on the tab.                                                                                                                                                              |
 | Nothing records / "offscreen not ready" | Reload the extension in `chrome://extensions`.                                                                                                                                                                                                          |
 | WebSocket won't connect                 | Save the server on the options page again so Chrome asks for access to its host, confirm the server is reachable, and that TLS validates.                                                                                                               |
