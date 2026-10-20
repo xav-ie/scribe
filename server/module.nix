@@ -85,7 +85,7 @@ in
           type = lib.types.int;
           default = 0;
           example = 99;
-          description = "Model layers on the GPU (needs a CUDA `package`). 0 runs on the CPU, about 11 seconds per 250 words on a desktop processor; 99 puts all of it on the GPU, about 3.5 GB of GPU memory beside scribe's 2.6 GB.";
+          description = "Model layers on the GPU (needs a CUDA `package`). 0 runs on the CPU: about 14 seconds per 250 words on a desktop processor. 99 puts every layer on the GPU: about 1.5 seconds on an RTX 3060 Ti, using about 1.7 GB of GPU memory, since the model's embedding tables stay in RAM.";
         };
 
         extraFlags = lib.mkOption {
