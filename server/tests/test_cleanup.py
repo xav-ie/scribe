@@ -103,6 +103,11 @@ def words(n, w="word"):
     return " ".join([w] * n)
 
 
+def varied(n, w, start=0):
+    """n different words, so the server doesn't take them for a recognition loop."""
+    return " ".join(f"{w}_{i}" for i in range(start, start + n))
+
+
 # --- chunking and the request ------------------------------------------------
 
 
@@ -131,7 +136,7 @@ def test_previous_is_up_to_80_words_of_up_to_5_lines(server):
 def test_request_follows_the_model_card(server, model, client, monkeypatch):
     long = record()
     long["segments"] = [
-        {"speaker": "Ada", "start": i * 10, "text": words(100, f"t{i}"), "at": 1}
+        {"speaker": "Ada", "start": i * 10, "text": varied(100, f"t{i}"), "at": 1}
         for i in range(4)
     ]
     long["diagnostics"] = [{"names": ["Ada", "Grace"]}]
@@ -149,13 +154,13 @@ def test_request_follows_the_model_card(server, model, client, monkeypatch):
     assert "model" not in first
     assert first["messages"][1]["content"] == (
         "<context>\nparticipants: Ada, Grace\n</context>\n<transcript>\n"
-        f"[0:00] Ada: {words(100, 't0')}\n[0:10] Ada: {words(100, 't1')}\n</transcript>"
+        f"[0:00] Ada: {varied(100, 't0')}\n[0:10] Ada: {varied(100, 't1')}\n</transcript>"
     )
     assert second["messages"][1]["content"].startswith(
         "<context>\nparticipants: Ada, Grace\n</context>\n<previous>\n"
-        f"[0:10] Ada: {words(80, 't1')}\n</previous>\n<transcript>\n[0:20] Ada: "
+        f"[0:10] Ada: {varied(80, 't1', 20)}\n</previous>\n<transcript>\n[0:20] Ada: "
     )
-    chars = len(f"[0:00] Ada: {words(100, 't0')}\n[0:10] Ada: {words(100, 't1')}")
+    chars = len(f"[0:00] Ada: {varied(100, 't0')}\n[0:10] Ada: {varied(100, 't1')}")
     assert first["max_tokens"] == int(1.3 * (chars // 3)) + 64
 
     monkeypatch.setattr(server, "CLEANUP_MODEL", "scribe-cleanup")
@@ -245,6 +250,43 @@ def test_the_guard_keeps_a_line_whose_number_changed(server, model, client):
         "keptRaw": True,
     }
     assert copy["lines"][0]["text"] == "So the the cost is fine."
+
+
+def test_a_recognition_loop_is_cut_before_the_model_sees_it(server, model, client):
+    loop = "we have a twenty " + "two " * 30 + "three minutes"
+    record = meeting()
+    record["segments"][1]["text"] = loop
+    client.post(f"/api/sessions/{SID}", json=record)
+    done(server)
+    sent = model.requests[-1][1]["messages"][1]["content"]
+    assert "we have a twenty two three minutes" in sent
+    copy = client.get(f"/api/sessions/{SID}?cleaned=true").json()["cleaned"]["copy"]
+    assert copy["keptRaw"] == 0
+    assert copy["lines"][1]["text"] == "We have a twenty two three minutes."
+
+
+def test_a_line_kept_raw_shows_the_loop_as_spoken(server, model, client):
+    loop = "so " + "two " * 6 + "off the price"
+    record = meeting()
+    record["segments"][1]["text"] = loop
+    model.answer = lambda lines: [tidy(line).replace("two", "20") for line in lines]
+    client.post(f"/api/sessions/{SID}", json=record)
+    done(server)
+    copy = client.get(f"/api/sessions/{SID}?cleaned=true").json()["cleaned"]["copy"]
+    assert copy["lines"][1]["keptRaw"] is True
+    assert copy["lines"][1]["text"] == loop.strip()
+
+
+def test_short_repeats_are_left_to_the_model(server):
+    assert server._cut_loops("no no no no") == "no no no no"
+    assert (
+        server._cut_loops("you know, you know, you know, you know, you know, so")
+        == "you know, so"
+    )
+    assert (
+        server._cut_loops("channel six one one one one oh")
+        == "channel six one one one one oh"
+    )
 
 
 def test_a_broken_answer_keeps_the_whole_chunk_raw(server, model, client):
