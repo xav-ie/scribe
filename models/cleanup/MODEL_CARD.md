@@ -94,8 +94,9 @@ Only Gemma's text part ships here; its image and audio parts are left out, since
    number or a "not". The worst case is then a line left uncleaned, never one that says something different.
 
 Send long meetings in chunks of about 250 words, never splitting a line. A chunk takes about 5 seconds on an 8 GB
-gaming graphics card and about 4 seconds on an Apple M5 with prompt lookup (below), so a one-hour meeting takes about
-3 minutes on a Mac.
+gaming graphics card, about 4 seconds on an Apple M5 with prompt lookup (below), and about 14 seconds on a desktop
+processor (an Intel i7-11700F) with llama.cpp and prompt lookup. A one-hour meeting takes about 3 minutes on a Mac
+and about 10 on that processor.
 
 **On a Mac:**
 
@@ -211,12 +212,15 @@ The compressed versions score the same, give or take random variation, on a samp
 
 ## Known weak spots
 
-From reading every mistake on the tests. The safety check catches the first three, so you see the original line.
+From reading every mistake on the tests. The safety check catches the first four, so you see the original line.
 
 - **Rare number slips:** "that's two off" once became "that's 20 off", in a handful of test lines.
 - **A digit dropped from a longer code:** "channel six one one one one oh" lost a "one". A doubled word, as in "one
   one little question", counts as a stutter and may become one.
 - **Heavy crosstalk** can make it merge or drop a line. That whole chunk then stays as the original.
+- **Recognition loops,** where speech-to-text repeats a word dozens of times ("two two two ..."), can make it repeat
+  the loop instead of cutting it, mostly when it runs on a CPU. Cut any run of 5 or more copies to one before
+  sending, as scribe does; the model was trained to treat such runs that way.
 - **Punctuation where people talk over each other** is often unclear, so its choices there are shaky.
 
 ## Limits and risks
