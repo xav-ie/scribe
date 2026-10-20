@@ -39,6 +39,8 @@ jobs:
               - '.github/workflows/ci.yml'
             server:
               - 'server/**'
+              - 'models/cleanup/guard.py'
+              - 'models/cleanup/prompt.txt'
               - 'flake.nix'
               - 'flake.lock'
               - '.github/workflows/ci.yml'

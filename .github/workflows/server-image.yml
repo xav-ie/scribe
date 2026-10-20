@@ -49,7 +49,7 @@ jobs:
           df -h /
       - name: Build
         run: |
-          docker build server \
+          docker build server --build-context cleanup=models/cleanup \
             --label org.opencontainers.image.source="https://github.com/${GITHUB_REPOSITORY}" \
             --label org.opencontainers.image.version="$VERSION" \
             --label org.opencontainers.image.revision="$(git rev-parse HEAD)" \
