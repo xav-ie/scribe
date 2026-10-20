@@ -107,9 +107,10 @@ access token, recordings and vocabulary in `~/.local/share/scribe` (set
 `~/.local/share/scribe/token` and pair the extension as in step 2.
 
 To keep it running in the background, started at login and restarted if it stops, run `scribe/server/launchd.sh
-install` (`uninstall` removes it, `status` shows it and the end of its log in `~/Library/Logs/scribe.log`). On an M5
+install` (`uninstall` removes it, `status` shows it and the end of its log in `~/Library/Logs/scribe.log`). Add
+`--cleanup` to also run the [optional cleanup](#optional-cleanup) model beside it and turn cleanup on. On an M5
 it transcribes about 10 times faster than real time and captions arrive about
-as fast as on an NVIDIA GPU; it uses about 4 GB of memory while running.
+as fast as on an NVIDIA GPU; it uses about 4 GB of memory while running, and the cleanup model adds its 2.8 GB of weights.
 
 ## After the meeting
 
@@ -277,7 +278,8 @@ In a container, use an address the container can reach instead of 127.0.0.1 (see
 the NixOS module, set `services.scribe.cleanup.url`.
 
 [`serve_mlx.py`](models/cleanup/serve_mlx.py) serves the Mac version with prompt lookup, about 1.5 times faster than
-`mlx_lm.server` at the same quality; `mlx_lm.server --model xav-ie/scribe-cleanup-mlx-4bit` works too.
+`mlx_lm.server` at the same quality; `mlx_lm.server --model xav-ie/scribe-cleanup-mlx-4bit` works too. On a Mac,
+`scribe/server/launchd.sh install --cleanup` runs both in the background and connects them.
 
 Each meeting is then cleaned when its recording ends, in the background, about 4 seconds per 250 words on a Mac
 (set `SCRIBE_CLEANUP_AUTO=0` to clean only when asked). The web UI shows its progress, a **clean up** button for older
