@@ -352,6 +352,6 @@ const fill = (file) => {
   });
   write(file, src);
 };
-["models/README.md", "models/cleanup/MODEL_CARD.md", "models/cleanup/METHODOLOGY.md", "models/cleanup/COMPARISON.md"].forEach(fill);
+["README.md", "models/README.md", "models/cleanup/MODEL_CARD.md", "models/cleanup/METHODOLOGY.md", "models/cleanup/COMPARISON.md"].forEach(fill);
 
 console.log(`Wrote ${Object.keys(built).length} diagrams and filled the model docs`);
