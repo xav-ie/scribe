@@ -262,9 +262,8 @@ cleanup writes a separate cleaned copy next to it and never changes the original
 Run the model behind any OpenAI-compatible server, then point scribe at it with `SCRIBE_CLEANUP_URL`:
 
 ```sh
-# On a Mac (Apple silicon)
-pip install mlx-lm
-mlx_lm.server --model xav-ie/scribe-cleanup-mlx-4bit --port 8080
+# On a Mac (Apple silicon), with uv installed
+models/cleanup/serve_mlx.py --port 8080
 
 # On Linux (or anywhere), with llama.cpp
 llama-server -hf xav-ie/scribe-cleanup-GGUF --port 8080 -c 8192 \
@@ -276,7 +275,10 @@ SCRIBE_CLEANUP_URL=http://127.0.0.1:8080/v1 scribe/server/run.sh
 In a container, use an address the container can reach instead of 127.0.0.1 (see [`compose.yaml`](compose.yaml)); with
 the NixOS module, set `services.scribe.cleanup.url`.
 
-Each meeting is then cleaned when its recording ends, in the background, about 7 seconds per 250 words on a Mac
+[`serve_mlx.py`](models/cleanup/serve_mlx.py) serves the Mac version with prompt lookup, about 1.5 times faster than
+`mlx_lm.server` at the same quality; `mlx_lm.server --model xav-ie/scribe-cleanup-mlx-4bit` works too.
+
+Each meeting is then cleaned when its recording ends, in the background, about 4 seconds per 250 words on a Mac
 (set `SCRIBE_CLEANUP_AUTO=0` to clean only when asked). The web UI shows its progress, a **clean up** button for older
 meetings, and an original/cleaned switch; agents read the cleaned copy with `get_transcript(cleaned=true)` and start one
 with `clean_transcript`. Every cleaned line passes the model's [safety check](models/cleanup/guard.py) first: where the
