@@ -49,6 +49,10 @@ Tunables (set by the Nix module via env):
   SCRIBE_CLEANUP_AUTO  clean each meeting when its recording ends (default
                       1 when SCRIBE_CLEANUP_URL is set; 0 cleans only on
                       request, from the web UI, the API or MCP)
+  SCRIBE_WYOMING      host:port for a Wyoming speech-to-text server (Home
+                      Assistant's voice pipelines), e.g. 0.0.0.0:10300; unset
+                      turns it off. Wyoming has no authentication, so bind it
+                      only where nothing untrusted can reach it
 
 A stream's first text message is {"sampleRate", "sessionId", "channel", "save",
 "boost", "token"}; "boost" (participant names) is boosted along with the
@@ -68,6 +72,7 @@ and editing the vocabulary.
 """
 
 import asyncio
+import contextlib
 import ctypes
 import functools
 import gc
@@ -525,6 +530,91 @@ async def transcriptions(file: UploadFile):
     if audio.size == 0:
         return {"text": ""}
     return {"text": await _transcribe_clip(audio, _boost_phrases(None))}
+
+
+# Wyoming (https://github.com/OHF-Voice/wyoming): JSON-line events over TCP, each
+# optionally followed by more JSON data and a binary payload.
+WYOMING = os.environ.get("SCRIBE_WYOMING", "").strip()
+MAX_WYOMING_EVENT = 2**20
+_WYOMING_ARTIFACT = {
+    "attribution": {"name": "NVIDIA", "url": f"https://huggingface.co/{MODEL_ID}"},
+    "installed": True,
+    "version": None,
+}
+WYOMING_INFO = {
+    "asr": [
+        {
+            "name": "scribe",
+            "description": "scribe speech-to-text",
+            **_WYOMING_ARTIFACT,
+            "models": [
+                {
+                    "name": MODEL_ID,
+                    "description": MODEL_ID,
+                    "languages": ["en"],
+                    **_WYOMING_ARTIFACT,
+                }
+            ],
+        }
+    ]
+}
+
+
+async def _read_wyoming(reader):
+    """The next (type, data, payload), or None at the end of the stream."""
+    line = await reader.readline()
+    if not line:
+        return None
+    header = json.loads(line)
+    data = header.get("data") or {}
+    lengths = header.get("data_length") or 0, header.get("payload_length") or 0
+    if any(n < 0 or n > MAX_WYOMING_EVENT for n in lengths):
+        raise ValueError(f"oversized event {header.get('type')}")
+    if lengths[0]:
+        data |= json.loads(await reader.readexactly(lengths[0]))
+    payload = await reader.readexactly(lengths[1]) if lengths[1] else b""
+    return header["type"], data, payload
+
+
+def _write_wyoming(writer, kind, data):
+    writer.write(json.dumps({"type": kind, "data": data}).encode() + b"\n")
+
+
+async def _wyoming_client(reader, writer):
+    """One Wyoming connection: answers describe with this server's model, and
+    transcribes the audio between audio-start and audio-stop, boosted with the
+    vocabulary like /v1/audio/transcriptions."""
+    chunks, rate, channels = [], SAMPLE_RATE, 1
+    try:
+        while event := await _read_wyoming(reader):
+            kind, data, payload = event
+            if kind == "describe":
+                _write_wyoming(writer, "info", WYOMING_INFO)
+            elif kind == "audio-start":
+                chunks, rate, channels = [], data["rate"], data["channels"]
+                if rate not in RATES or data["width"] != 2 or channels < 1:
+                    raise ValueError(f"unsupported audio {data}")
+            elif kind == "audio-chunk":
+                chunks.append(payload)
+                if sum(map(len, chunks)) > MAX_CLIP_S * rate * 2 * channels:
+                    raise ValueError(f"clips are limited to {MAX_CLIP_S} s")
+            elif kind == "audio-stop":
+                pcm = b"".join(chunks)
+                pcm = pcm[: len(pcm) - len(pcm) % (2 * channels)]
+                audio = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+                audio = _to_16k(audio.reshape(-1, channels).mean(axis=1), rate)
+                text = ""
+                if audio.size:
+                    text = await _transcribe_clip(audio, _boost_phrases(None))
+                _write_wyoming(writer, "transcript", {"text": text})
+                chunks = []
+            await writer.drain()
+    except (ValueError, KeyError, TypeError, asyncio.IncompleteReadError) as e:
+        print(f"[scribe] wyoming client dropped: {e!r}", flush=True)
+    except ConnectionError:
+        pass
+    finally:
+        writer.close()
 
 
 class Recording:
@@ -1779,5 +1869,24 @@ _mcp_app = mcp.streamable_http_app(
     stateless_http=True,
     transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
 )
-app.router.lifespan_context = _mcp_app.router.lifespan_context
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(app):
+    async with _mcp_app.router.lifespan_context(app):
+        if not WYOMING:
+            yield
+            return
+        host, _, port = WYOMING.rpartition(":")
+        server = await asyncio.start_server(
+            _wyoming_client, host.strip("[]") or None, int(port)
+        )
+        print(f"[scribe] wyoming on {WYOMING}", flush=True)
+        try:
+            yield
+        finally:
+            server.close()  # without waiting on clients still connected
+
+
+app.router.lifespan_context = _lifespan
 app.mount("", _mcp_app)
