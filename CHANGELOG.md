@@ -1,3 +1,17 @@
+## 0.1.2 (2026-10-20)
+
+### Features
+
+#### Your mic is always recorded
+
+The popup's "Capture my microphone" checkbox is gone: once mic access is granted, every recording includes your mic as its own stream, still silenced while you're muted in the meeting.
+
+### Fixes
+
+#### Speakers in the web UI's live view
+
+A meeting still recording now shows in the web UI as speaker turns, like the extension's popup, instead of each stream's words in one block. The extension sends its active speaker timeline along with the tab audio, so both need updating.
+
 ## 0.1.1 (2026-10-20)
 
 ### Features
