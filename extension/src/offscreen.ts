@@ -13,7 +13,7 @@
 //   micStream ─▶ micSource ───▶ pcmTap("mic") ─▶ WS ─▶ scribe  (your voice)
 //
 // Each pcmTap (AudioWorklet) posts Float32 blocks → int16 PCM → its own
-// WebSocket. The mic channel can be added/removed mid-recording (setMic).
+// WebSocket. The mic channel reopens mid-recording when the meeting switches mics.
 // Capturing a tab mutes its audio until you reconnect it to the output — that
 // `tabSource.connect(ctx.destination)` line is the unmute fix.
 
@@ -70,10 +70,7 @@ let session: Session | null = null;
 // (or another start) lands sees a newer number and backs out, releasing what
 // it opened, instead of recording while the background thinks it's idle.
 let generation = 0;
-// Whether the user wants the mic; checked again once it has opened, so toggling
-// it off (or on twice) while permission/capture is pending can't leave a hot
-// mic or a second socket.
-let micWanted = false;
+// Set while the mic is opening, so a second open can't start a second socket.
 let micOpening = false;
 
 // Each meeting tab's last reported mute state. While the captured tab's is
@@ -401,8 +398,8 @@ async function addMic(): Promise<void> {
     micOpening = false;
   });
   if (!micStream) return;
-  // The session may have ended, or the mic been toggled off, meanwhile.
-  if (!session || session.mic || !micWanted) {
+  // The session may have ended meanwhile.
+  if (!session || session.mic) {
     for (const t of micStream.getTracks()) t.stop();
     return;
   }
@@ -445,7 +442,6 @@ function removeMic(): void {
 async function start(
   opts: StreamOpts & {
     streamId: string;
-    withMic: boolean;
     tabId: number;
     timeline: SpeakerSpan[];
   },
@@ -453,7 +449,6 @@ async function start(
   if (session) return;
   const gen = ++generation;
   captureTabId = opts.tabId;
-  micWanted = opts.withMic;
   timeline = [...opts.timeline];
   timelineFor = opts.sessionId;
 
@@ -502,7 +497,7 @@ async function start(
       stream,
     };
 
-    if (opts.withMic) await addMic();
+    await addMic();
     if (gen !== generation) return;
 
     console.log(`[offscreen] streaming started (mic: ${session?.mic != null})`);
@@ -561,10 +556,6 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
       void start(message);
       break;
     }
-    case 'OFFSCREEN_SET_MIC': {
-      void setMic(message.enabled);
-      break;
-    }
     case 'MEETING_MIC': {
       const tab = sender.tab?.id;
       if (tab === undefined) break;
@@ -600,10 +591,3 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
     }
   }
 });
-
-async function setMic(enabled: boolean): Promise<void> {
-  micWanted = enabled;
-  if (!session) return;
-  if (enabled) await addMic();
-  else removeMic();
-}

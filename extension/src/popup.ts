@@ -22,7 +22,6 @@ const UNKNOWN = 'Unknown';
 $<HTMLElement>('mark').style.backgroundImage = `url(${mark})`;
 const recordBtn = $<HTMLButtonElement>('record');
 const statusEl = $<HTMLSpanElement>('status');
-const micToggle = $<HTMLInputElement>('withMic');
 const debugToggle = $<HTMLInputElement>('debug');
 const saveAudioToggle = $<HTMLInputElement>('saveAudio');
 const exportBtn = $<HTMLButtonElement>('exportDebug');
@@ -83,7 +82,6 @@ async function trackMicPermission(): Promise<void> {
 
 async function init(): Promise<void> {
   const settings = await getSettings();
-  micToggle.checked = settings.withMic;
   debugToggle.checked = settings.debug;
   saveAudioToggle.checked = settings.saveAudio;
   // The token stays out of sight.
@@ -112,10 +110,6 @@ recordBtn.addEventListener('click', () => {
   chrome.runtime.sendMessage({ type, target: 'background' } satisfies Message);
 });
 
-micToggle.addEventListener(
-  'change',
-  () => void setSettings({ withMic: micToggle.checked }),
-);
 debugToggle.addEventListener(
   'change',
   () => void setSettings({ debug: debugToggle.checked }),

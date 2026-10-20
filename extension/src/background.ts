@@ -240,7 +240,6 @@ async function startRecording(): Promise<void> {
       type: 'OFFSCREEN_START',
       target: 'offscreen',
       streamId,
-      withMic: settings.withMic,
       wsUrl: server.url,
       token: server.token,
       debug: settings.debug,
@@ -682,33 +681,14 @@ chrome.runtime.onStartup.addListener(() => {
   reconcileStaleState().catch(() => {});
 });
 
-// Relay a mid-recording "capture microphone" toggle to the offscreen doc so the
-// mic is added/removed in the live audio graph without a stop/start. No-op when
-// idle (the next start picks the setting up normally).
-async function relayMic(enabled: boolean): Promise<void> {
-  const { status } = await getState();
-  if (status !== 'recording') return;
-  chrome.runtime
-    .sendMessage({
-      type: 'OFFSCREEN_SET_MIC',
-      target: 'offscreen',
-      enabled,
-    } satisfies Message)
-    .catch(() => {});
-}
-
 // --- debug + live settings ----------------------------------------------
-// Keep the debug flag in sync with the popup toggle (no reload needed), and
-// relay the mic toggle to a live recording.
+// Keep the debug flag in sync with the popup toggle (no reload needed).
 chrome.storage.sync.get({ debug: false }, (s) => setDebug(Boolean(s.debug)));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'sync') return;
   if (changes.debug) {
     setDebug(Boolean(changes.debug.newValue));
     dlog('[bg] debug logging enabled');
-  }
-  if (changes.withMic) {
-    relayMic(Boolean(changes.withMic.newValue)).catch(() => {});
   }
 });
 

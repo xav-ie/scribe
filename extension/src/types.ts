@@ -44,7 +44,6 @@ interface OffscreenStart {
   type: 'OFFSCREEN_START';
   target: 'offscreen';
   streamId: string;
-  withMic: boolean;
   wsUrl: string;
   /** The server's access token, if it needs one. */
   token?: string;
@@ -81,14 +80,6 @@ interface OffscreenStop {
 interface OffscreenResync {
   type: 'OFFSCREEN_RESYNC';
   target: 'offscreen';
-}
-
-// background -> offscreen: add/remove the mic in the live audio graph when the
-// "capture microphone" toggle flips mid-recording (no stop/start needed).
-interface OffscreenSetMic {
-  type: 'OFFSCREEN_SET_MIC';
-  target: 'offscreen';
-  enabled: boolean;
 }
 
 // offscreen -> background: new words from a stream. They replace that stream's
@@ -163,7 +154,6 @@ export type Message =
   | OffscreenStart
   | OffscreenStop
   | OffscreenResync
-  | OffscreenSetMic
   | SpeakerSpanUpdate
   | SpeakerDiag
   | TranscriptUpdate
