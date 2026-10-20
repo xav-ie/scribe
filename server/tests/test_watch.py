@@ -99,3 +99,27 @@ def test_a_failed_save_still_frees_the_stream(client, server, monkeypatch):
             stream.send_text(hello(sessionId=SID, channel="tab", save=True))
         assert json.loads(w.receive_text())["type"] == "closed"
     settle(lambda: FakeState.instances[0].closed)
+
+
+def test_watchers_get_each_streams_clock_and_speakers(client):
+    with client.websocket_connect("/ws") as stream:
+        stream.send_text(hello(sessionId=SID, channel="tab"))
+        stream.send_text(json.dumps({"epoch": 1000}))
+        stream.send_text(json.dumps({"speaker": "Ada", "from": 900}))
+        stream.send_bytes(pcm())
+        stream.receive_text()
+        with client.websocket_connect(f"/ws/watch/{SID}") as w:
+            snap = [json.loads(w.receive_text()) for _ in range(3)]
+            assert [m["type"] for m in snap] == ["words", "epoch", "speaker"]
+            assert snap[1]["epoch"] == 1000
+            assert (snap[2]["name"], snap[2]["from"]) == ("Ada", 900)
+            stream.send_text(json.dumps({"speaker": "Grace", "from": 2000}))
+            # Not a span: no name, or no finite time.
+            stream.send_text(json.dumps({"speaker": 1, "from": 3000}))
+            stream.send_text(json.dumps({"speaker": "Linus"}))
+            stream.send_bytes(pcm())
+            stream.receive_text()
+            span = json.loads(w.receive_text())
+            assert span["type"] == "speaker" and span["name"] == "Grace"
+            assert span["stream"] == snap[0]["stream"]
+            assert json.loads(w.receive_text())["type"] == "words"

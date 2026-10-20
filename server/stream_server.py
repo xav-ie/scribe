@@ -59,10 +59,14 @@ A stream's first text message is {"sampleRate", "sessionId", "channel", "save",
 vocabulary, and "token" is the access token when the server has one.
 {"type": "end"} flushes the last partial step and is answered with the final
 words and {"type": "done"}; the stream should send no audio after it.
+{"epoch": ms} is the wall-clock time of the stream's first sample, and
+{"speaker": name, "from": ms} says who is talking in it from that wall-clock
+time on (the meeting's active speaker, or the mic's owner from 0); the server
+only passes these on to watchers.
 
-/ws/watch/<sessionId> follows a session's streams while they run: the words so
-far, then every update their clients get (see LIVE), or {"type": "idle"} when
-none is running.
+/ws/watch/<sessionId> follows a session's streams while they run: the words,
+clock and speakers so far, then every update their clients get (see LIVE), or
+{"type": "idle"} when none is running.
 
 GET / serves ui.html, a browser for those sessions over the /api routes, and
 /mcp is an MCP server (streamable HTTP) for listing, reading and searching
@@ -89,6 +93,7 @@ import threading
 import time
 import urllib.request
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -717,12 +722,56 @@ def _open_recording(config, src_rate):
 
 # --- live streams ------------------------------------------------------------
 
-# Streams in progress, by session: {sessionId: {stream id: (channel, StreamState)}}.
+# Streams in progress, by session: {sessionId: {stream id: LiveStream}}.
 # Watchers of a session (/ws/watch, the web UI) get each stream's word updates,
-# the same {"type": "words", "from", "words"} its own client gets, tagged with
-# "stream" and "channel"; {"type": "closed", "stream"} ends one.
+# the same {"type": "words", "from", "words"} its own client gets, its clock as
+# {"type": "epoch", "epoch"} and its speakers as {"type": "speaker", "name",
+# "from"}, all tagged with "stream" and "channel"; {"type": "closed", "stream"}
+# ends one.
 LIVE = {}
+MAX_SPEAKER_NAME = 200
+
+
+@dataclass
+class LiveStream:
+    channel: str
+    state: object
+    epoch: float | None = None
+    speakers: list = field(default_factory=list)
+
+    def snapshot(self, stream_id):
+        """What a watcher joining now needs to catch up on this stream."""
+        tag = {"stream": stream_id, "channel": self.channel}
+        msgs = [{"type": "words", "from": 0, "words": self.state.words}]
+        if self.epoch is not None:
+            msgs.append({"type": "epoch", "epoch": self.epoch})
+        msgs += [{"type": "speaker", **span} for span in self.speakers]
+        return [json.dumps(msg | tag) for msg in msgs]
+
+
 WATCHERS = {}
+
+
+def _number(value):
+    """`value` when it's a finite JSON number, else None."""
+    ok = isinstance(value, int | float) and not isinstance(value, bool)
+    return value if ok and math.isfinite(value) else None
+
+
+def _live_meta(live, stream_id, config):
+    """Keep and pass on a live stream's clock and speakers, for its watchers."""
+    stream = LIVE.get(live[0], {}).get(stream_id)
+    if stream is None:
+        return
+    tag = {"stream": stream_id, "channel": live[1]}
+    if (epoch := _number(config.get("epoch"))) is not None:
+        stream.epoch = epoch
+        _publish(live[0], {"type": "epoch", "epoch": epoch} | tag)
+    name, start = config.get("speaker"), _number(config.get("from"))
+    if isinstance(name, str) and start is not None:
+        span = {"name": name[:MAX_SPEAKER_NAME], "from": start}
+        stream.speakers.append(span)
+        _publish(live[0], {"type": "speaker", **span} | tag)
 
 
 def _publish(session_id, msg):
@@ -797,12 +846,8 @@ def _read_session(folder):
     if not isinstance(session, dict):
         return None
 
-    def number(value):
-        ok = isinstance(value, int | float) and not isinstance(value, bool)
-        return value if ok and math.isfinite(value) else None
-
     for key in ("startedAt", "stoppedAt"):
-        session[key] = number(session.get(key))
+        session[key] = _number(session.get(key))
     if not isinstance(session.get("platform"), str):
         session["platform"] = None
     session["segments"] = [
@@ -811,7 +856,7 @@ def _read_session(folder):
         if isinstance(seg, dict)
         and isinstance(seg.get("speaker"), str)
         and isinstance(seg.get("text"), str)
-        and number(seg.get("start")) is not None
+        and _number(seg.get("start")) is not None
     ]
     return session
 
@@ -1120,7 +1165,9 @@ async def ws(websocket: WebSocket):
                     session_id = str(config.get("sessionId"))
                     if live is None and SESSION_ID_RE.fullmatch(session_id):
                         live = (session_id, str(config.get("channel") or "audio"))
-                        LIVE.setdefault(session_id, {})[stream_id] = (live[1], state)
+                        LIVE.setdefault(session_id, {})[stream_id] = LiveStream(
+                            live[1], state
+                        )
                     phrases = _boost_phrases(config.get("boost"))
                     if phrases:
                         async with _gpu_lock:
@@ -1130,6 +1177,8 @@ async def ws(websocket: WebSocket):
                 # Wall-clock ms of the stream's first sample, sent once audio starts.
                 if recording is not None and "epoch" in config:
                     recording.meta["epoch"] = config["epoch"]
+                if live is not None:
+                    _live_meta(live, stream_id, config)
                 continue
             raw = msg.get("bytes")
             if not raw:
@@ -1196,11 +1245,9 @@ async def watch(websocket: WebSocket, session_id: str):
     # Snapshot and subscribe with no await in between, so every update queued
     # for this watcher is newer than the snapshot it follows.
     snapshot = [
-        json.dumps(
-            {"type": "words", "from": 0, "words": state.words}
-            | {"stream": stream_id, "channel": channel}
-        )
-        for stream_id, (channel, state) in LIVE.get(session_id, {}).items()
+        text
+        for stream_id, stream in LIVE.get(session_id, {}).items()
+        for text in stream.snapshot(stream_id)
     ]
     # None running: it ended between the page's last look and this socket.
     queue = asyncio.Queue()

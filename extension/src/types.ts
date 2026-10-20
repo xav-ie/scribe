@@ -7,12 +7,13 @@
 //   popup ──START/STOP──▶ background ──OFFSCREEN_START/STOP──▶ offscreen
 //   offscreen ──TRANSCRIPT_UPDATE──▶ background   (streamed words)
 //   content  ──SPEAKER_EVENT───────▶ background   (active-speaker changes)
+//   background ──SPEAKER_SPAN──────▶ offscreen    (relayed to the server)
 //   offscreen ──STATE_UPDATE───────▶ background   (status/error)
 //   content  ──MUTE_STATE──────────▶ offscreen    (gates the mic stream)
 
 import type { SpeakerDiagnostics } from './speaker/types';
 import type { RecState } from './state';
-import type { Word } from './transcript';
+import type { SpeakerSpan, Word } from './transcript';
 
 interface StartRecording {
   type: 'START_RECORDING';
@@ -55,6 +56,19 @@ interface OffscreenStart {
   boost: string[];
   /** The captured tab: only its mute reports gate the mic. */
   tabId: number;
+  /** The speaker timeline so far; later spans follow as SPEAKER_SPAN. */
+  timeline: SpeakerSpan[];
+  /** Who the mic stream's words are attributed to. */
+  micSpeaker: string;
+}
+
+// background -> offscreen: the active speaker changed. Sent on the tab stream's
+// socket so the server's live view can attribute words as they come.
+interface SpeakerSpanUpdate {
+  type: 'SPEAKER_SPAN';
+  target: 'offscreen';
+  sessionId: string;
+  span: SpeakerSpan;
 }
 
 interface OffscreenStop {
@@ -150,6 +164,7 @@ export type Message =
   | OffscreenStop
   | OffscreenResync
   | OffscreenSetMic
+  | SpeakerSpanUpdate
   | SpeakerDiag
   | TranscriptUpdate
   | SpeakerEvent

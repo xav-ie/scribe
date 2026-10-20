@@ -248,6 +248,8 @@ async function startRecording(): Promise<void> {
       saveAudio: settings.saveAudio,
       boost,
       tabId: tab.id,
+      timeline: mem?.timeline ?? [],
+      micSpeaker: MIC_SPEAKER,
     } satisfies Message)
     .catch(() => {});
   clearTimeout(startTimer);
@@ -529,7 +531,17 @@ async function onSpeakerEvent(
     dlog('[bg] speaker dropped (same as current):', name);
     return;
   }
-  s.timeline.push({ name, from: atEpoch });
+  const span = { name, from: atEpoch };
+  s.timeline.push(span);
+  if (s.sessionId)
+    chrome.runtime
+      .sendMessage({
+        type: 'SPEAKER_SPAN',
+        target: 'offscreen',
+        sessionId: s.sessionId,
+        span,
+      } satisfies Message)
+      .catch(() => {});
   dlog(
     '[bg] speaker:',
     name,
