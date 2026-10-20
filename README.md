@@ -134,7 +134,7 @@ on a meeting, and add names it saw misheard to the vocabulary so the next
 meeting gets them right.
 
 <details>
-<summary><b>NixOS module</b></summary>
+<summary><b>With Nix: NixOS and nix-darwin modules</b></summary>
 
 ```nix
 {
@@ -153,6 +153,10 @@ meeting gets them right.
           services.scribe.tokenFile = "/run/agenix/scribe-token";
           # The container listens on 8000; publishing it is up to you.
           virtualisation.oci-containers.containers.scribe.ports = [ "127.0.0.1:8000:8000" ];
+          # Optional cleanup: run the model on this host with llama.cpp (CPU by default) and use it.
+          services.scribe.cleanup.server.enable = true;
+          # services.scribe.cleanup.server.package = pkgs.llama-cpp.override { cudaSupport = true; };
+          # services.scribe.cleanup.server.gpuLayers = 99;
         }
       ];
     };
@@ -163,6 +167,24 @@ meeting gets them right.
 The module builds the image on the host (`build-scribe-image.service`), so the
 multi-GB CUDA environment stays out of the Nix store, and runs it with podman
 and the NVIDIA container toolkit.
+
+On an Apple silicon Mac with [nix-darwin](https://github.com/nix-darwin/nix-darwin), the server and the cleanup model
+run as login agents, logging to `~/Library/Logs/scribe.log` and `scribe-cleanup.log`:
+
+```nix
+darwinConfigurations.mac = nix-darwin.lib.darwinSystem {
+  modules = [
+    scribe.darwinModules.default
+    {
+      services.scribe.enable = true;          # http://localhost:8000, data in ~/.local/share/scribe
+      services.scribe.cleanup.enable = true;  # optional: the cleanup model beside it, cleanup on
+    }
+  ];
+};
+```
+
+Without a module, `nix run github:xav-ie/scribe#server` runs the server on a Mac and
+`nix run github:xav-ie/scribe#cleanup-server` the cleanup model (on port 8080).
 
 </details>
 
@@ -275,7 +297,8 @@ SCRIBE_CLEANUP_URL=http://127.0.0.1:8080/v1 scribe/server/run.sh
 ```
 
 In a container, use an address the container can reach instead of 127.0.0.1 (see [`compose.yaml`](compose.yaml)); with
-the NixOS module, set `services.scribe.cleanup.url`.
+the NixOS module, set `services.scribe.cleanup.url`, or `services.scribe.cleanup.server.enable` to run the model on
+the same host; the nix-darwin module has `services.scribe.cleanup.enable`.
 
 [`serve_mlx.py`](models/cleanup/serve_mlx.py) serves the Mac version with prompt lookup, about 1.5 times faster than
 `mlx_lm.server` at the same quality; `mlx_lm.server --model xav-ie/scribe-cleanup-mlx-4bit` works too. On a Mac,
@@ -300,7 +323,7 @@ and how it compares with other models.
 
 ```sh
 nix develop                  # python + pytest, ruff, nixfmt, node, pnpm
-nix flake check              # ruff, nixfmt, server tests, module eval
+nix flake check              # ruff, nixfmt, server tests, NixOS module eval
 pytest server/tests          # the server's tests on their own (no GPU: the ML stack is stubbed)
 cd extension && pnpm i && pnpm check && pnpm build
 pnpm screenshot               # regenerate the README images
