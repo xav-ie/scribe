@@ -77,6 +77,30 @@
                 }
               ];
             }).config.systemd.units."podman-scribe.service".unit;
+          module-cleanup =
+            let
+              config =
+                (nixpkgs.lib.nixosSystem {
+                  inherit system;
+                  modules = [
+                    self.nixosModules.default
+                    {
+                      services.scribe.enable = true;
+                      services.scribe.cleanup.server.enable = true;
+                      boot.loader.grub.enable = false;
+                      fileSystems."/" = {
+                        device = "none";
+                        fsType = "tmpfs";
+                      };
+                      system.stateVersion = nixpkgs.lib.trivial.release;
+                    }
+                  ];
+                }).config;
+            in
+            assert
+              config.virtualisation.oci-containers.containers.scribe.environment.SCRIBE_CLEANUP_URL
+              == "http://host.containers.internal:8081/v1";
+            config.systemd.units."scribe-cleanup.service".unit;
         }
       );
 
