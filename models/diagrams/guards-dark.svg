@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1062 684" width="1062" height="684" role="img"><style>
+  text { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #fbefe6; }
+  .bg { fill: #1d1711; }
+  .box { fill: #130f0b; stroke: #4c3929; stroke-width: 2; }
+  .key { fill: #ff4136; fill-opacity: .12; stroke: #ff4136; stroke-width: 2.5; }
+  .ask { fill: #130f0b; stroke: #c9936b; stroke-width: 2; stroke-dasharray: 7 5; }
+  .end { fill: #c9936b; fill-opacity: .2; stroke: #c9936b; stroke-width: 2; }
+  .frame { fill: #130f0b; stroke: #4c3929; stroke-width: 1.5; }
+  .group { fill: none; stroke: #ecd0b8; stroke-width: 1.5; stroke-dasharray: 6 5; }
+  .title { font-size: 16px; font-weight: 650; }
+  .sub { font-size: 13.5px; fill: #ecd0b8; }
+  .label { font-size: 13px; font-weight: 550; fill: #c9936b; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+  .edge { fill: none; stroke: #c9936b; stroke-width: 2; marker-end: url(#arrow); }
+  .tag { fill: #1d1711; }
+  .head { fill: #c9936b; }
+  .ref { stroke: #ecd0b8; stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .bar-ours { fill: #ff4136; }
+  .bar-baseline { fill: #ecd0b8; fill-opacity: .45; }
+  .bar-dictation { fill: #c9936b; fill-opacity: .8; }
+</style><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="head" d="M0 0L10 5L0 10z"/></marker></defs><rect class="bg" width="1062" height="684"/><rect class="group" x="24" y="184" width="1014" height="316" rx="16"/><text class="title" x="42" y="212">Cleanup</text><rect class="box" x="24" y="24" width="1014" height="128" rx="14"/><text class="title" x="531" y="53.1" text-anchor="middle">In: a chunk of raw lines</text><text class="sub" x="531" y="72.2" text-anchor="middle">about 250 words, cleaned together</text><rect class="frame" x="38" y="86" width="986" height="52" rx="8"/><text xml:space="preserve" class="mono" x="50" y="108">[0:43] Alice: um so the the cost should uh not exceed twelve fifty</text><text xml:space="preserve" class="mono" x="50" y="127">[0:48] Bob: so that's two off the price</text><rect class="key" x="48" y="230" width="966" height="128" rx="14"/><text class="title" x="531" y="259.1" text-anchor="middle">The cleanup model's lines</text><text class="sub" x="531" y="278.2" text-anchor="middle">one per raw line, same order</text><rect class="frame" x="62" y="292" width="938" height="52" rx="8"/><text xml:space="preserve" class="mono" x="74" y="314">[0:43] Alice: So the cost should not exceed twelve fifty.</text><text xml:space="preserve" class="mono" x="74" y="333">[0:48] Bob: So that's 20 off the price.</text><rect class="ask" x="204" y="392" width="654" height="84" rx="14"/><text class="title" x="531" y="430.1" text-anchor="middle">Safety check: each line against its original</text><text class="sub" x="531" y="449.2" text-anchor="middle">same timestamp and speaker, same numbers, every “not” kept</text><rect class="end" x="24" y="532" width="1014" height="128" rx="14"/><text class="title" x="531" y="561.1" text-anchor="middle">Out: the cleaned chunk</text><text class="sub" x="531" y="580.2" text-anchor="middle">a line that passes is used; a line that fails stays as it was</text><rect class="frame" x="38" y="594" width="986" height="52" rx="8"/><text xml:space="preserve" class="mono" x="50" y="616">[0:43] Alice: So the cost should not exceed twelve fifty.  ← passed</text><text xml:space="preserve" class="mono" x="50" y="635">[0:48] Bob: so that's two off the price                    ← failed: “two” became 20</text><path class="edge" d="M531 152L531 230"/><path class="edge" d="M531 358L531 392"/><path class="edge" d="M531 476L531 532"/></svg>

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1062 333" width="1062" height="333" role="img"><style>
+  text { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #fbefe6; }
+  .bg { fill: #1d1711; }
+  .box { fill: #130f0b; stroke: #4c3929; stroke-width: 2; }
+  .key { fill: #ff4136; fill-opacity: .12; stroke: #ff4136; stroke-width: 2.5; }
+  .ask { fill: #130f0b; stroke: #c9936b; stroke-width: 2; stroke-dasharray: 7 5; }
+  .end { fill: #c9936b; fill-opacity: .2; stroke: #c9936b; stroke-width: 2; }
+  .frame { fill: #130f0b; stroke: #4c3929; stroke-width: 1.5; }
+  .group { fill: none; stroke: #ecd0b8; stroke-width: 1.5; stroke-dasharray: 6 5; }
+  .title { font-size: 16px; font-weight: 650; }
+  .sub { font-size: 13.5px; fill: #ecd0b8; }
+  .label { font-size: 13px; font-weight: 550; fill: #c9936b; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+  .edge { fill: none; stroke: #c9936b; stroke-width: 2; marker-end: url(#arrow); }
+  .tag { fill: #1d1711; }
+  .head { fill: #c9936b; }
+  .ref { stroke: #ecd0b8; stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .bar-ours { fill: #ff4136; }
+  .bar-baseline { fill: #ecd0b8; fill-opacity: .45; }
+  .bar-dictation { fill: #c9936b; fill-opacity: .8; }
+</style><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="head" d="M0 0L10 5L0 10z"/></marker></defs><rect class="bg" width="1062" height="333"/><text class="sub" x="24" y="59">Raw transcript</text><text class="sub" x="24" y="91">Rules only</text><text class="sub" x="24" y="123">Stock Gemma 4 E2B (2B)</text><text class="title" x="24" y="155">scribe cleanup v1 (2B)</text><text class="sub" x="24" y="187">Simplewords v2 (2B)</text><text class="sub" x="24" y="219">Boswell (1.7B)</text><text class="sub" x="24" y="251">Spokenly Cleanup 1 (0.6B)</text><text class="sub" x="24" y="283">Sotto (0.35B)</text><text class="title" x="300" y="26">Errors in words, punctuation and capitals on meetings (lower is better)</text><line class="ref" x1="701.9" y1="37" x2="701.9" y2="299"/><rect class="tag" x="646.8" y="299" width="110.3" height="19" rx="5"/><text class="label" x="701.9" y="313" text-anchor="middle">raw transcript</text><rect class="bar-baseline" x="300" y="43" width="401.9" height="22" rx="4"/><rect class="tag" x="705.9" y="45" width="44.5" height="18" rx="4"/><text class="sub" x="709.9" y="59">23.1%</text><rect class="bar-baseline" x="300" y="75" width="362.7" height="22" rx="4"/><rect class="tag" x="666.7" y="77" width="44.5" height="18" rx="4"/><text class="sub" x="670.7" y="91">20.8%</text><rect class="bar-baseline" x="300" y="107" width="413.1" height="22" rx="4"/><rect class="tag" x="717.1" y="109" width="44.5" height="18" rx="4"/><text class="sub" x="721.1" y="123">23.7%</text><rect class="bar-ours" x="300" y="139" width="232.8" height="22" rx="4"/><rect class="tag" x="536.8" y="141" width="44.5" height="18" rx="4"/><text class="sub" x="540.8" y="155">13.4%</text><rect class="bar-dictation" x="300" y="171" width="515.8" height="22" rx="4"/><rect class="tag" x="819.8" y="173" width="44.5" height="18" rx="4"/><text class="sub" x="823.8" y="187">29.6%</text><rect class="bar-dictation" x="300" y="203" width="648" height="22" rx="4"/><rect class="tag" x="952" y="205" width="44.5" height="18" rx="4"/><text class="sub" x="956" y="219">37.2%</text><rect class="bar-dictation" x="300" y="235" width="461.4" height="22" rx="4"/><rect class="tag" x="765.4" y="237" width="44.5" height="18" rx="4"/><text class="sub" x="769.4" y="251">26.5%</text><rect class="bar-dictation" x="300" y="267" width="516.3" height="22" rx="4"/><rect class="tag" x="820.3" y="269" width="44.5" height="18" rx="4"/><text class="sub" x="824.3" y="283">29.6%</text></svg>

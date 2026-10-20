@@ -80,7 +80,8 @@ jobs:
       - name: Regenerate and compare
         run: |
           nix develop --command node scripts/assets.mjs
-          git diff --exit-code || { echo "::error::generated assets are out of date: run node scripts/assets.mjs in nix develop and commit the result"; exit 1; }
+          nix develop --command node scripts/diagrams.mjs
+          git diff --exit-code || { echo "::error::generated assets are out of date: run node scripts/assets.mjs and node scripts/diagrams.mjs in nix develop and commit the result"; exit 1; }
 
   commit-messages:
     runs-on: ubuntu-latest

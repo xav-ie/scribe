@@ -15,6 +15,12 @@
   },
   "light": {
     "bg": "#f6e6da",
-    "rec": "#d92d20"
+    "surface": "#fffaf6",
+    "line": "#e2c6b0",
+    "border": "#9c5a34",
+    "text": "#2b1c12",
+    "muted": "#6f5240",
+    "rec": "#d92d20",
+    "ok": "#2f7d3a"
   }
 }
