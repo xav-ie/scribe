@@ -9,7 +9,8 @@
 **Live meeting transcription on your own GPU, with every speaker named.** A
 Chrome extension streams your Google Meet or Zoom call to a self-hosted
 recognition server and shows captions as people talk. Every meeting is kept,
-searchable by you and by your AI agents.
+searchable by you and by your AI agents, and scribe's own open cleanup model can
+turn it into clean, readable text without changing what anyone said.
 
 ![The extension's popup over a Google Meet call, showing the live transcript with each line labeled by speaker](assets/screenshot.png)
 
@@ -19,6 +20,11 @@ searchable by you and by your AI agents.
   audio never leaves your network, and captions arrive within about a second.
 - **Names and jargon spelled right.** A vocabulary you keep, plus each
   meeting's participant names, is boosted during recognition.
+- **Clean transcripts from our own model.** [scribe cleanup v1](models/README.md)
+  removes the ums, stutters and false starts and fixes punctuation and
+  capitals, keeping every other word, speaker, timestamp and number. It runs on
+  your own computer, and it beats every other small open cleanup model we
+  measured. Optional; the original transcript always stays the record.
 - **Every meeting kept.** Replay audio next to its transcript, or follow a
   recording live, in the server's web UI.
 - **Ready for agents.** An MCP server lets AI agents list, read and search
@@ -318,6 +324,17 @@ other word, every speaker and timestamp, and every number. It runs on your own c
 hour-long meeting on a Mac), and the original transcript always stays the record; [the server runs it for
 you](#optional-cleanup) when you point it at one. See [models/](models/README.md) for how to use it, how it was built,
 and how it compares with other models.
+
+<!-- table:comparison-verdict -->
+In short: scribe cleanup makes the fewest errors and drops 0.5% of real words; the dictation models drop 4.5% to 15.5%, and lose a "not" in 1.8% to 29.1% of meeting chunks.
+<!-- /table:comparison-verdict -->
+
+<!-- diagram:quality -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="models/diagrams/quality-dark.svg">
+  <img src="models/diagrams/quality.svg" alt="Errors in words, punctuation and capitals on meetings (lower is better): Raw transcript 23.1%, Rules only 20.8%, Stock Gemma 4 E2B 23.7%, scribe cleanup v1 13.4%, Simplewords v2 29.6%, Boswell 37.2%, Spokenly Cleanup 1 26.5%, Sotto 29.6%">
+</picture>
+<!-- /diagram:quality -->
 
 ## Development
 
