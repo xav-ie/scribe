@@ -105,7 +105,9 @@ access token, recordings and vocabulary in `~/.local/share/scribe` (set
 `SCRIBE_DATA` to move them); log in with the token from
 `~/.local/share/scribe/token` and pair the extension as in step 2.
 
-On an M5 it transcribes about 10 times faster than real time and captions arrive about
+To keep it running in the background, started at login and restarted if it stops, run `scribe/server/launchd.sh
+install` (`uninstall` removes it, `status` shows it and the end of its log in `~/Library/Logs/scribe.log`). On an M5
+it transcribes about 10 times faster than real time and captions arrive about
 as fast as on an NVIDIA GPU; it uses about 4 GB of memory while running.
 
 ## After the meeting
