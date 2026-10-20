@@ -5,7 +5,11 @@
 services:
   scribe:
     image: ghcr.io/xav-ie/scribe:latest
-    # build: server   # or build it from this checkout instead
+    # Or build it from this checkout instead:
+    # build:
+    #   context: server
+    #   additional_contexts:
+    #     cleanup: models/cleanup
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -16,6 +20,14 @@ services:
       SCRIBE_TOKEN_FILE: /run/secrets/scribe-token
       # Host names the server answers to (see the README's security note).
       SCRIBE_ALLOWED_HOSTS: localhost,127.0.0.1
+      # Optional transcript cleanup (see the README): an OpenAI-compatible
+      # server running the scribe cleanup model, as this container reaches it
+      # (127.0.0.1 here is the container itself). Each meeting is then cleaned
+      # into a separate copy when it ends; the transcript never changes.
+      # On Linux, host.docker.internal also needs
+      # extra_hosts: ["host.docker.internal:host-gateway"] on this service.
+      # SCRIBE_CLEANUP_URL: http://host.docker.internal:8080/v1
+      # SCRIBE_CLEANUP_AUTO: "0"   # clean only when asked
     deploy:
       resources:
         reservations:

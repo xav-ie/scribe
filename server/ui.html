@@ -244,6 +244,21 @@
         margin: 18px 0 8px;
         font-size: 15px;
       }
+      .cleanup {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 12px;
+        margin: 14px 0 0;
+      }
+      .cleanup button.off {
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--line);
+      }
+      .turn.kept {
+        box-shadow: inset 3px 0 var(--warn);
+      }
       pre {
         font-family: var(--mono);
         white-space: pre-wrap;
@@ -401,7 +416,9 @@
 
       async function show(id) {
         where.textContent = `/ ${id}`;
-        const { session, channels, live } = await api(`/api/sessions/${id}`);
+        const { session, channels, live, cleaned } = await api(
+          `/api/sessions/${id}?cleaned=true`,
+        );
         if (live) return watchLive(id);
 
         // Each saved stream plays against its own clock: the wall-clock epoch of
@@ -445,7 +462,15 @@
           }
         };
 
-        const turns = segments.map((seg) =>
+        // The cleanup model's copy, line for line with the segments, when
+        // there is one. The original stays the record and the default view.
+        const copy = cleaned?.copy;
+        const cleanLines =
+          copy?.lines?.length === segments.length ? copy.lines : null;
+        const texts = segments.map((seg) =>
+          el("div", { textContent: seg.text }),
+        );
+        const turns = segments.map((seg, i) =>
           el(
             "div",
             {
@@ -479,10 +504,25 @@
                   style: `color:${color(seg.speaker)}`,
                 },
               ),
-              el("div", { textContent: seg.text }),
+              texts[i],
             ),
           ),
         );
+        const showCleaned = (on) => {
+          segments.forEach((seg, i) => {
+            const line = on ? cleanLines[i] : null;
+            texts[i].textContent = line
+              ? line.text || "(only filler)"
+              : seg.text;
+            texts[i].className = line && !line.text ? "muted" : "";
+            turns[i].classList.toggle("kept", Boolean(line?.keptRaw));
+            turns[i].title = line?.keptRaw
+              ? "Kept as spoken: the safety check put the original line back"
+              : turns[i].tabIndex === 0
+                ? "Play from here"
+                : "";
+          });
+        };
 
         // Highlight the line being heard, following the tab stream's clock.
         const lead = players.find((p) => p.stem === "tab" && p.epoch != null);
@@ -552,6 +592,8 @@
           );
         }
         if (turns.length > 0) {
+          const bar = cleanupBar(id, cleaned, cleanLines, showCleaned);
+          if (bar) body.push(bar);
           body.push(el("h2", { textContent: "Transcript" }), ...turns);
         } else {
           // No record from the extension (it never reached Stop): show each saved
@@ -567,6 +609,96 @@
           }
         }
         app.replaceChildren(...body);
+      }
+
+      // The cleanup model's copy of a transcript (when the server runs it): an
+      // original/cleaned switch, how many lines the safety check kept as
+      // spoken, the latest run's progress, and a button to clean (again).
+      function cleanupBar(id, cleaned, cleanLines, showCleaned) {
+        if (!cleaned?.configured && !cleanLines) return null;
+        const bar = el("div", { className: "cleanup" });
+        const status = el("span", { className: "muted" });
+        const here = location.hash;
+
+        if (cleanLines) {
+          const pick = (view) => {
+            localStorage.setItem("scribe.view", view);
+            showCleaned(view === "cleaned");
+            original.className = view === "cleaned" ? "off" : "";
+            tidy.className = view === "cleaned" ? "" : "off";
+            original.ariaPressed = String(view !== "cleaned");
+            tidy.ariaPressed = String(view === "cleaned");
+          };
+          const original = el("button", {
+            textContent: "Original",
+            onclick: () => pick("original"),
+          });
+          const tidy = el("button", {
+            textContent: "Cleaned",
+            onclick: () => pick("cleaned"),
+          });
+          bar.append(original, tidy);
+          pick(localStorage.getItem("scribe.view") ?? "original");
+        }
+
+        const copy = cleaned.copy;
+        const describe = (run) => {
+          if (run?.status === "queued") return "Cleanup is waiting its turn…";
+          if (run?.status === "running")
+            return `Cleaning up: ${run.chunksDone} of ${run.chunks} parts done…`;
+          const failed =
+            run?.status === "failed" ? `Cleanup failed: ${run.error}. ` : "";
+          if (!copy) return failed || "Not cleaned up yet.";
+          return (
+            failed +
+            `Cleaned by ${copy.model ?? "the cleanup model"}; ` +
+            `${copy.keptRaw} of ${copy.lineCount} lines kept as spoken by the safety check` +
+            (copy.stale ? ". The transcript changed since." : ".")
+          );
+        };
+        const busy = (run) => ["queued", "running"].includes(run?.status);
+        status.textContent = describe(cleaned.run);
+
+        // Follow a run until it ends, then show the new copy.
+        const follow = async () => {
+          try {
+            for (;;) {
+              await sleep(2000);
+              if (location.hash !== here) return;
+              const { cleaned: now } = await api(`/api/sessions/${id}`);
+              status.textContent = describe(now.run);
+              if (!busy(now.run)) return route();
+            }
+          } catch (e) {
+            status.textContent = String(e);
+          }
+        };
+        if (cleaned.configured) {
+          const again = el("button", {
+            className: "off",
+            textContent: copy ? "Clean up again" : "Clean up",
+            hidden: busy(cleaned.run),
+            onclick: async () => {
+              again.hidden = true;
+              const r = await fetch(`/api/sessions/${id}/clean`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: "{}",
+              });
+              if (!r.ok) {
+                again.hidden = false;
+                status.textContent = `Cleanup could not start (${r.status}).`;
+                return;
+              }
+              status.textContent = describe(await r.json());
+              follow();
+            },
+          });
+          bar.append(again);
+        }
+        bar.append(status);
+        if (busy(cleaned.run)) follow();
+        return bar;
       }
 
       // A session still recording: follow its streams over /ws/watch, applying

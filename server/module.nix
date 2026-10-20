@@ -21,6 +21,10 @@ let
     cp ${./uv.lock} $out/uv.lock
     cp ${./stream_server.py} $out/stream_server.py
     cp ${./ui.html} $out/ui.html
+    # The cleanup model's prompt and safety check, a separate build context.
+    mkdir $out/cleanup
+    cp ${../models/cleanup/guard.py} $out/cleanup/guard.py
+    cp ${../models/cleanup/prompt.txt} $out/cleanup/prompt.txt
   '';
 in
 {
@@ -48,6 +52,27 @@ in
         "localhost"
       ];
       description = "Host names scribe answers to; requests for any other Host are refused, which stops DNS rebinding. Empty answers any Host. Access itself is controlled by tokenFile.";
+    };
+
+    cleanup = {
+      url = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "http://host.containers.internal:8080/v1";
+        description = "An OpenAI-compatible chat server running the scribe cleanup model (llama-server with its GGUF, for one), as the container reaches it: a server on this host must listen on an address other than 127.0.0.1, which inside the container is the container itself. Cleanup writes a separate cleaned copy of each transcript; the transcript itself never changes. Null turns cleanup off.";
+      };
+
+      model = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        description = "The model name sent to the cleanup server. Null sends none, so the server uses the model it loaded.";
+      };
+
+      auto = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Clean each meeting when its recording ends. When false, meetings are cleaned only on request: from the web UI, the API or the MCP tool clean_transcript.";
+      };
     };
   };
 
@@ -81,7 +106,8 @@ in
         TimeoutStartSec = "60min";
       };
       script = ''
-        podman build -f ${scribeSrc}/Dockerfile -t localhost/scribe:latest ${scribeSrc}
+        podman build -f ${scribeSrc}/Dockerfile -t localhost/scribe:latest \
+          --build-context cleanup=${scribeSrc}/cleanup ${scribeSrc}
       '';
     };
 
@@ -93,6 +119,13 @@ in
       }
       // lib.optionalAttrs (cfg.tokenFile != null) {
         SCRIBE_TOKEN_FILE = "/run/secrets/scribe-token";
+      }
+      // lib.optionalAttrs (cfg.cleanup.url != null) {
+        SCRIBE_CLEANUP_URL = cfg.cleanup.url;
+        SCRIBE_CLEANUP_AUTO = if cfg.cleanup.auto then "1" else "0";
+      }
+      // lib.optionalAttrs (cfg.cleanup.model != null) {
+        SCRIBE_CLEANUP_MODEL = cfg.cleanup.model;
       }
       // {
         HF_HOME = "/cache/huggingface";

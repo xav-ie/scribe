@@ -39,6 +39,16 @@ Tunables (set by the Nix module via env):
                       Without either the server is open, and says so.
   SCRIBE_ALLOWED_HOSTS  comma-separated host names the server answers to (e.g.
                       scribe.example.com,localhost); unset answers any Host
+  SCRIBE_CLEANUP_URL  an OpenAI-compatible chat server running the scribe
+                      cleanup model (e.g. http://127.0.0.1:8080/v1, from
+                      mlx_lm.server or llama-server); unset turns cleanup off.
+                      Cleanup writes a separate cleaned copy (cleaned.json);
+                      the transcript itself never changes
+  SCRIBE_CLEANUP_MODEL  the model name sent to that server (default: none,
+                      so the server uses the model it loaded)
+  SCRIBE_CLEANUP_AUTO  clean each meeting when its recording ends (default
+                      1 when SCRIBE_CLEANUP_URL is set; 0 cleans only on
+                      request, from the web UI, the API or MCP)
 
 A stream's first text message is {"sampleRate", "sessionId", "channel", "save",
 "boost", "token"}; "boost" (participant names) is boosted along with the
@@ -59,8 +69,11 @@ and editing the vocabulary.
 
 import asyncio
 import ctypes
+import functools
 import gc
+import hashlib
 import hmac
+import importlib.util
 import json
 import logging
 import math
@@ -68,6 +81,8 @@ import os
 import re
 import sys
 import threading
+import time
+import urllib.request
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -176,6 +191,15 @@ RECORDINGS = Path(os.environ.get("SCRIBE_RECORDINGS", "/cache/recordings"))
 # The session id becomes a directory name, so only accept a UUID.
 SESSION_ID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+# Optional transcript cleanup by a separate model server (see "cleanup" below).
+CLEANUP_URL = os.environ.get("SCRIBE_CLEANUP_URL", "").strip().rstrip("/")
+CLEANUP_MODEL = os.environ.get("SCRIBE_CLEANUP_MODEL", "").strip()
+CLEANUP_AUTO = os.environ.get("SCRIBE_CLEANUP_AUTO", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
 )
 
 torch.set_grad_enabled(False)
@@ -711,8 +735,9 @@ def ui():
 
 @app.get("/api/info")
 def info():
-    """Whether this server needs a token; clients warn when it doesn't."""
-    return {"auth": TOKEN is not None}
+    """Whether this server needs a token (clients warn when it doesn't), and
+    whether transcript cleanup is configured."""
+    return {"auth": TOKEN is not None, "cleanup": bool(CLEANUP_URL)}
 
 
 def _secure(request):
@@ -802,16 +827,21 @@ def list_sessions():
 
 
 @app.get("/api/sessions/{session_id}")
-def get_session(session_id: str):
+def get_session(session_id: str, cleaned: bool = False):
+    """A session: the extension's record (its segments are the raw
+    transcript), the saved streams, and the cleaned copy's status; with
+    ?cleaned=true, also the cleaned copy's lines."""
     folder = _session_dir(session_id)
     live = session_id in LIVE
     if not folder.is_dir() and not live:
         raise HTTPException(404)
+    session = _read_session(folder)
     return {
         "sessionId": session_id,
-        "session": _read_session(folder),
+        "session": session,
         "channels": _channels(folder, with_words=True),
         "live": live,
+        "cleaned": _cleaned_view(session_id, session, with_lines=cleaned),
     }
 
 
@@ -849,6 +879,9 @@ async def put_session(session_id: str, request: Request):
         _write_json(folder / "session.json", record)
 
     await asyncio.to_thread(save)
+    # The extension posts its record when the recording ends.
+    if CLEANUP_URL and CLEANUP_AUTO and (_read_session(folder) or {}).get("segments"):
+        _start_cleanup(session_id)
     return {"ok": True}
 
 
@@ -1102,6 +1135,325 @@ async def watch(websocket: WebSocket, session_id: str):
             WATCHERS.pop(session_id, None)
 
 
+# --- cleanup -----------------------------------------------------------------
+
+# Optional: the scribe cleanup model (models/cleanup/MODEL_CARD.md) tidies a
+# finished transcript. It runs behind any OpenAI-compatible chat server at
+# SCRIBE_CLEANUP_URL; scribe only sends it chunks of the transcript and passes
+# every answer through the model's own safety check (models/cleanup/guard.py),
+# which keeps the raw line wherever a timestamp, speaker, number or "not"
+# changed. The result is a separate copy, <session>/cleaned.json; session.json
+# is never written. cleaning.json holds the latest run's progress and status.
+CHUNK_WORDS = 250  # whole lines up to about this many words per request
+PREVIOUS_WORDS = 80  # earlier context sent with each chunk, as in training
+PREVIOUS_LINES = 5
+CLEANUP_TIMEOUT_S = 600  # one chunk; a CPU-only llama-server is slow
+
+
+@functools.cache
+def _cleanup_kit():
+    """(guard module, system prompt, prompt version) from models/cleanup: next
+    to this file in the image and the Nix build, or in the checkout."""
+    here = Path(__file__).parent
+    for folder in (here / "cleanup", here.parent / "models" / "cleanup"):
+        if (folder / "guard.py").is_file() and (folder / "prompt.txt").is_file():
+            break
+    else:
+        raise RuntimeError("scribe: models/cleanup (guard.py, prompt.txt) not found")
+    spec = importlib.util.spec_from_file_location(
+        "scribe_cleanup_guard", folder / "guard.py"
+    )
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    prompt = (folder / "prompt.txt").read_text().strip()
+    return guard, prompt, hashlib.sha256(prompt.encode()).hexdigest()[:12]
+
+
+if CLEANUP_URL:
+    _cleanup_kit()  # fail at start, not after the first meeting
+    print(
+        f"[scribe] cleanup by {CLEANUP_URL}"
+        + (" after every recording" if CLEANUP_AUTO else " on request"),
+        flush=True,
+    )
+
+
+def _raw_lines(session):
+    """The transcript as (m:ss, speaker, text), one per segment, in the form the
+    cleanup model was trained on. A speaker can't hold a colon there."""
+    return [
+        (
+            _clock(max(0, s["start"])),
+            " ".join(s["speaker"].replace(":", " ").split()) or "Unknown",
+            " ".join(s["text"].split()),
+        )
+        for s in (session or {}).get("segments") or []
+    ]
+
+
+def _fmt(lines):
+    return "\n".join(f"[{t}] {s}: {x}".rstrip() for t, s, x in lines)
+
+
+def _source_hash(lines):
+    """Identifies the transcript a cleaned copy was made from."""
+    return hashlib.sha256(_fmt(lines).encode()).hexdigest()[:16]
+
+
+def _chunks(lines):
+    """Index ranges of whole lines, about CHUNK_WORDS words each. A line longer
+    than that is a chunk of its own."""
+    out, start, words = [], 0, 0
+    for i, (_, _, text) in enumerate(lines):
+        n = len(text.split())
+        if i > start and words + n > CHUNK_WORDS:
+            out.append(range(start, i))
+            start, words = i, 0
+        words += n
+    if start < len(lines):
+        out.append(range(start, len(lines)))
+    return out
+
+
+def _previous(lines, start):
+    """Up to PREVIOUS_WORDS words of the lines before `start`, the earliest one
+    cut from its beginning when it doesn't fit."""
+    out, budget = [], PREVIOUS_WORDS
+    for t, s, text in reversed(lines[max(0, start - PREVIOUS_LINES) : start]):
+        if budget <= 0:
+            break
+        words = text.split()
+        out.insert(0, (t, s, " ".join(words[-budget:])))
+        budget -= len(words)
+    return out
+
+
+def _cleanup_request(lines, chunk, participants):
+    """The user message for one chunk, as MODEL_CARD.md describes."""
+    context = (
+        f"<context>\nparticipants: {', '.join(participants)}\n</context>\n"
+        if participants
+        else ""
+    )
+    previous = _previous(lines, chunk.start)
+    previous = f"<previous>\n{_fmt(previous)}\n</previous>\n" if previous else ""
+    return f"{context}{previous}<transcript>\n{_fmt(lines[chunk.start : chunk.stop])}\n</transcript>"
+
+
+def _chat(system, user, max_tokens):
+    """One completion from SCRIBE_CLEANUP_URL: (text, model name)."""
+    body = {
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0,
+        "max_tokens": max_tokens,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    if CLEANUP_MODEL:
+        body["model"] = CLEANUP_MODEL
+    request = urllib.request.Request(
+        f"{CLEANUP_URL}/chat/completions",
+        json.dumps(body).encode(),
+        {"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=CLEANUP_TIMEOUT_S) as response:
+        reply = json.load(response)
+    return reply["choices"][0]["message"]["content"] or "", reply.get("model")
+
+
+def _clean_chunk(lines, chunk, participants):
+    """Cleaned texts for the chunk's lines, whether each was kept raw, and the
+    model's name. Every answer goes through guard.guard_lines."""
+    guard, prompt, _ = _cleanup_kit()
+    raw = [f"[{t}] {s}: {x}".rstrip() for t, s, x in lines[chunk.start : chunk.stop]]
+    # Tokens of the chunk, roughly (meeting English runs about 3.5 to 4
+    # characters a token); the answer is about as long as the question.
+    tokens = len("\n".join(raw)) // 3
+    answer, model = _chat(
+        prompt, _cleanup_request(lines, chunk, participants), int(1.3 * tokens) + 64
+    )
+    cleaned = [line.strip() for line in answer.splitlines() if line.strip()]
+    shown, reverted = guard.guard_lines(raw, cleaned)
+    matches = [guard.LINE.match(line) for line in shown]
+    if len(matches) != len(raw) or not all(matches):
+        # Can't happen with lines from _raw_lines; keep the chunk raw if it does.
+        return (
+            [x for _, _, x in lines[chunk.start : chunk.stop]],
+            [True] * len(raw),
+            model,
+        )
+    # Kept raw: the guard showed the raw line where the model had changed it
+    # (or broke the chunk's line format, which keeps the whole chunk raw).
+    whole = len(cleaned) != len(raw)
+    kept = [
+        reverted > 0 and shown[i] == raw[i] and (whole or cleaned[i] != raw[i])
+        for i in range(len(raw))
+    ]
+    return [m.group(3).strip() for m in matches], kept, model
+
+
+# Runs in progress or waiting, by session id: {"status", "chunksDone", ...}.
+# One run at a time (one model server); each in its own thread, so neither
+# the event loop nor live transcription ever waits on it.
+_JOBS = {}
+_jobs_lock = threading.Lock()
+_model_lock = threading.Lock()
+
+
+def _set_job(session_id, **fields):
+    with _jobs_lock:
+        job = _JOBS.setdefault(session_id, {})
+        job.update(fields)
+        snapshot = dict(job)
+    snapshot.pop("again", None)
+    _write_json(RECORDINGS / session_id / "cleaning.json", snapshot)
+    return snapshot
+
+
+def _start_cleanup(session_id):
+    """Clean a session's transcript in the background, unless it's already
+    queued or running (then it runs once more after, for a newer record).
+    Returns the run's status."""
+    with _jobs_lock:
+        job = _JOBS.get(session_id)
+        if job and job["status"] in ("queued", "running"):
+            job["again"] = True
+            return {k: v for k, v in job.items() if k != "again"}
+        _JOBS[session_id] = {}
+    status = _set_job(
+        session_id,
+        status="queued",
+        chunksDone=0,
+        chunks=None,
+        error=None,
+        queuedAt=_now(),
+        startedAt=None,
+        finishedAt=None,
+    )
+    threading.Thread(target=_cleanup_worker, args=(session_id,), daemon=True).start()
+    return status
+
+
+def _cleanup_worker(session_id):
+    while True:
+        with _model_lock:
+            try:
+                _clean_session(session_id)
+            except (
+                Exception
+            ) as e:  # reported in the status; the transcript is untouched
+                logger.warning("cleanup of %s failed", session_id, exc_info=True)
+                _set_job(
+                    session_id,
+                    status="failed",
+                    error=str(e) or type(e).__name__,
+                    finishedAt=_now(),
+                )
+        with _jobs_lock:
+            again = _JOBS[session_id].pop("again", False)
+        if not again:
+            return
+        _set_job(session_id, status="queued", chunksDone=0, chunks=None, error=None)
+
+
+def _model_name(reported):
+    """The model the server says answered. mlx_lm.server says default_model
+    when none was asked for, which names nothing; llama-server gives its file."""
+    return reported if reported and reported != "default_model" else None
+
+
+def _clean_session(session_id):
+    folder = RECORDINGS / session_id
+    session = _read_session(folder)
+    lines = _raw_lines(session)
+    if not lines:
+        raise RuntimeError("no transcript to clean")
+    _, _, prompt_version = _cleanup_kit()
+    chunks = _chunks(lines)
+    started, t0 = _now(), time.monotonic()
+    _set_job(session_id, status="running", chunks=len(chunks), startedAt=started)
+    participants = _participants(session)
+    texts, kept, model = [], [], None
+    for done, chunk in enumerate(chunks, 1):
+        t, k, model = _clean_chunk(lines, chunk, participants)
+        texts += t
+        kept += k
+        _set_job(session_id, chunksDone=done)
+    segments = session["segments"]
+    _write_json(
+        folder / "cleaned.json",
+        {
+            "model": CLEANUP_MODEL or _model_name(model),
+            "promptVersion": prompt_version,
+            "source": _source_hash(lines),
+            "startedAt": started,
+            "finishedAt": _now(),
+            "seconds": round(time.monotonic() - t0, 1),
+            "chunks": len(chunks),
+            "keptRaw": sum(kept),
+            "lines": [
+                {"start": seg["start"], "speaker": seg["speaker"], "text": text}
+                | ({"keptRaw": True} if raw else {})
+                for seg, text, raw in zip(segments, texts, kept, strict=True)
+            ],
+        },
+    )
+    _set_job(session_id, status="done", finishedAt=_now())
+
+
+def _cleaning(session_id):
+    """The latest run's status, or None. One a restart cut short says so."""
+    with _jobs_lock:
+        job = _JOBS.get(session_id)
+        if job is not None:
+            return {k: v for k, v in job.items() if k != "again"}
+    job = _read_json(RECORDINGS / session_id / "cleaning.json")
+    if isinstance(job, dict) and job.get("status") in ("queued", "running"):
+        job |= {"status": "failed", "error": "the server stopped before it finished"}
+    return job if isinstance(job, dict) else None
+
+
+def _cleaned_copy(session_id, session):
+    """The cleaned copy, marked stale when the transcript changed since."""
+    copy = _read_json(RECORDINGS / session_id / "cleaned.json")
+    if not isinstance(copy, dict) or not isinstance(copy.get("lines"), list):
+        return None
+    return copy | {"stale": copy.get("source") != _source_hash(_raw_lines(session))}
+
+
+def _cleaned_view(session_id, session, with_lines):
+    """What the API reports about cleanup for a session: whether it's
+    configured, the latest run, and the cleaned copy (lines on request)."""
+    copy = _cleaned_copy(session_id, session)
+    if copy is not None:
+        copy["lineCount"] = len(copy["lines"])
+        if not with_lines:
+            del copy["lines"]
+    return {
+        "configured": bool(CLEANUP_URL),
+        "available": copy is not None,
+        "copy": copy,
+        "run": _cleaning(session_id),
+    }
+
+
+@app.post("/api/sessions/{session_id}/clean", status_code=202)
+def clean_session(session_id: str, request: Request):
+    """Clean (or clean again) a session's transcript in the background; the
+    session's "cleaned.run" reports progress."""
+    folder = _session_dir(session_id)
+    # A JSON content type can't be sent cross-site without a CORS preflight.
+    if request.headers.get("content-type", "").split(";")[0] != "application/json":
+        raise HTTPException(415)
+    if not CLEANUP_URL:
+        raise HTTPException(409, "cleanup is off: set SCRIBE_CLEANUP_URL")
+    if not (_read_session(folder) or {}).get("segments"):
+        raise HTTPException(404, "no transcript for this session")
+    return _start_cleanup(session_id)
+
+
 # --- MCP ---------------------------------------------------------------------
 
 mcp = MCPServer(
@@ -1109,7 +1461,10 @@ mcp = MCPServer(
     instructions=(
         "Transcripts of meetings recorded by the meeting capture extension. "
         "Times are UTC. Speakers come from the meeting's active-speaker "
-        "indicator; 'Unknown' is speech it couldn't attribute."
+        "indicator; 'Unknown' is speech it couldn't attribute. When the server "
+        "runs the cleanup model, a meeting may also have a cleaned copy "
+        "(get_transcript with cleaned=true); the original stays the record. "
+        "That copy is separate from cleanups, which are notes an agent saved."
     ),
 )
 
@@ -1157,6 +1512,19 @@ def _participants(session):
     )
 
 
+def _cleaned_brief(session_id):
+    """list_meetings' summary of the cleanup model's copy and latest run."""
+    copy = _read_json(RECORDINGS / session_id / "cleaned.json")
+    run = _cleaning(session_id)
+    return {
+        "available": isinstance(copy, dict),
+        "keptRaw": copy.get("keptRaw") if isinstance(copy, dict) else None,
+        "run": {k: run.get(k) for k in ("status", "chunksDone", "chunks", "error")}
+        if run
+        else None,
+    }
+
+
 def _clock(sec):
     return f"{int(sec // 60)}:{int(sec % 60):02d}"
 
@@ -1168,7 +1536,9 @@ def list_meetings(
     """Recorded meetings, newest first. since/until are ISO 8601 times bounding
     when a meeting started (UTC when no offset is given). title is from the
     newest finished cleanup, and cleanup is the newest cleanup's status.
-    participants is everyone shown in the meeting, speaking or not."""
+    participants is everyone shown in the meeting, speaking or not. cleaned
+    says whether the cleanup model made a cleaned copy (get_transcript with
+    cleaned=true reads it) and how its latest run went."""
     out = []
     for s in _sessions_between(since, until)[:limit]:
         cleanups = _cleanups(s["sessionId"])
@@ -1186,24 +1556,65 @@ def list_meetings(
                 ),
                 "words": s["words"],
                 "cleanup": cleanups[-1]["status"] if cleanups else None,
+                "cleaned": _cleaned_brief(s["sessionId"]),
             }
         )
     return out
 
 
 @mcp.tool()
-def get_transcript(session_id: str) -> str:
+def get_transcript(session_id: str, cleaned: bool = False) -> str:
     """A meeting's transcript as "[m:ss] Speaker: text" lines, m:ss from the
-    start of the recording."""
+    start of the recording. cleaned=true returns the cleanup model's copy
+    instead (fillers, stutters and false starts removed, punctuation fixed;
+    lines its safety check kept as spoken end in "(as spoken)"), when the
+    meeting has one (list_meetings says); the original stays the record."""
     session = _read_session(_meeting_dir(session_id))
     if not session:
         raise ToolError(f"no transcript for session {session_id}")
     head = f"Meeting {session_id}, started {_iso(session.get('startedAt'))}, on {session.get('platform')}\nParticipants: {', '.join(_participants(session))}"
+    if not cleaned:
+        lines = [
+            f"[{_clock(s['start'])}] {s['speaker']}: {s['text']}"
+            for s in session.get("segments") or []
+        ]
+        return "\n".join([head, "", *lines])
+    copy = _cleaned_copy(session_id, session)
+    if copy is None:
+        raise ToolError(
+            f"session {session_id} has no cleaned copy"
+            + ("; clean_transcript makes one" if CLEANUP_URL else "; cleanup is off")
+        )
+    note = (
+        f"Cleaned copy by {copy.get('model') or 'the cleanup model'}, {copy.get('finishedAt')}; "
+        f"{copy.get('keptRaw')} line(s) kept as spoken by its safety check"
+        + (
+            "; the transcript changed since, so it is out of date"
+            if copy["stale"]
+            else ""
+        )
+    )
     lines = [
-        f"[{_clock(s['start'])}] {s['speaker']}: {s['text']}"
-        for s in session.get("segments") or []
+        f"[{_clock(max(0, line['start']))}] {line['speaker']}: {line['text']}".rstrip()
+        + (" (as spoken)" if line.get("keptRaw") else "")
+        for line in copy["lines"]
     ]
-    return "\n".join([head, "", *lines])
+    return "\n".join([head, note, "", *lines])
+
+
+@mcp.tool()
+def clean_transcript(session_id: str) -> dict:
+    """Start the cleanup model on a meeting's transcript, or again to replace
+    its cleaned copy. It runs in the background (seconds per 250 words);
+    this returns the run's status, list_meetings shows progress, and
+    get_transcript(cleaned=true) reads the result. The original transcript
+    never changes. Only on servers with cleanup configured."""
+    folder = _meeting_dir(session_id)
+    if not CLEANUP_URL:
+        raise ToolError("cleanup is off on this server (SCRIBE_CLEANUP_URL)")
+    if not (_read_session(folder) or {}).get("segments"):
+        raise ToolError(f"no transcript for session {session_id}")
+    return _start_cleanup(session_id)
 
 
 @mcp.tool()

@@ -19,6 +19,11 @@ COPY pyproject.toml uv.lock ./
 RUN pip install --no-cache-dir uv==0.13.0 \
  && uv sync --frozen --no-dev
 COPY stream_server.py ui.html ./
+# The cleanup model's prompt and safety check, from models/cleanup in the
+# checkout, which is outside this build context: build with
+#   docker build server --build-context cleanup=models/cleanup
+# hadolint ignore=DL3022
+COPY --from=cleanup guard.py prompt.txt ./cleanup/
 
 LABEL org.opencontainers.image.title="scribe" \
       org.opencontainers.image.description="Live meeting transcription server: NVIDIA Parakeet streaming ASR, web UI and MCP" \

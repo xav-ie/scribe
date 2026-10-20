@@ -168,9 +168,12 @@ and the NVIDIA container toolkit.
 <summary><b>Build from source</b></summary>
 
 ```sh
-podman build -t scribe server     # or docker build
+podman build -t scribe server --build-context cleanup=models/cleanup   # or docker build
 cd extension && pnpm install && pnpm build   # then load extension/dist
 ```
+
+The image takes the cleanup model's prompt and safety check from
+`models/cleanup`, hence the second build context.
 
 </details>
 
@@ -183,8 +186,8 @@ cd extension && pnpm install && pnpm build   # then load extension/dist
 | `WS /ws`                                  | Streaming recognition (protocol below).                                                                                                                        |
 | `WS /ws/watch/<sessionId>`                | Follow a session's streams live, as the web UI does.                                                                                                           |
 | `POST /v1/audio/transcriptions`           | OpenAI-style batch transcription of an uploaded clip; replies `{"text"}`.                                                                                      |
-| `/api/sessions`, `/api/vocab`             | The JSON API behind the web UI.                                                                                                                                |
-| `/mcp`                                    | MCP server (streamable HTTP): `list_meetings`, `get_transcript`, `search_transcripts`, cleanups (notes an agent made from a transcript), and vocabulary tools. |
+| `/api/sessions`, `/api/vocab`             | The JSON API behind the web UI. `GET /api/sessions/<id>?cleaned=true` adds the cleaned copy; `POST /api/sessions/<id>/clean` makes one.                         |
+| `/mcp`                                    | MCP server (streamable HTTP): `list_meetings`, `get_transcript` (`cleaned=true` for the cleaned copy), `search_transcripts`, `clean_transcript`, cleanups (notes an agent made from a transcript), and vocabulary tools. |
 | `/api/info`, `/api/login`, `/api/pairing` | Whether a token is required, the web UI's login, and the extension's pairing URL.                                                                              |
 
 With a token set, every route except `/`, `/health`, `/api/info` and the login
@@ -236,8 +239,9 @@ Environment variables, documented at the top of
 (`SCRIBE_DEVICE`: `cuda`, `mps` or `cpu`; by default the GPU it finds, and the
 CPU, far slower than real time, only when asked for), the model, context sizes,
 boosting strength, where recordings and the vocabulary live, the access token
-(`SCRIBE_TOKEN_FILE`, or `SCRIBE_TOKEN` as an escape hatch) and
-`SCRIBE_ALLOWED_HOSTS`.
+(`SCRIBE_TOKEN_FILE`, or `SCRIBE_TOKEN` as an escape hatch),
+`SCRIBE_ALLOWED_HOSTS`, and the [optional cleanup](#optional-cleanup)
+(`SCRIBE_CLEANUP_URL`, `SCRIBE_CLEANUP_MODEL`, `SCRIBE_CLEANUP_AUTO`).
 
 Without a token the server is open to anyone who can reach it, and the web UI
 and extension say so. When it leaves your machine, serve it over HTTPS so the
@@ -247,6 +251,36 @@ WebSockets: their Origin must match the Host, so a reverse proxy should pass
 the Host header through (e.g. nginx's `proxy_set_header Host $host`).
 
 </details>
+
+## Optional cleanup
+
+The server can tidy each meeting's transcript with the [scribe cleanup model](models/cleanup/MODEL_CARD.md): it
+removes ums, stutters and false starts and fixes punctuation and capitals, keeping every other word, speaker,
+timestamp and number. It is off unless you turn it on, and **the original transcript always stays the record**:
+cleanup writes a separate cleaned copy next to it and never changes the original.
+
+Run the model behind any OpenAI-compatible server, then point scribe at it with `SCRIBE_CLEANUP_URL`:
+
+```sh
+# On a Mac (Apple silicon)
+pip install mlx-lm
+mlx_lm.server --model xav-ie/scribe-cleanup-mlx-4bit --port 8080
+
+# On Linux (or anywhere), with llama.cpp
+llama-server -hf xav-ie/scribe-cleanup-GGUF --port 8080 -c 8192 \
+  --spec-type ngram-simple --spec-ngram-simple-size-n 3 --spec-ngram-simple-size-m 16
+
+SCRIBE_CLEANUP_URL=http://127.0.0.1:8080/v1 scribe/server/run.sh
+```
+
+In a container, use an address the container can reach instead of 127.0.0.1 (see [`compose.yaml`](compose.yaml)); with
+the NixOS module, set `services.scribe.cleanup.url`.
+
+Each meeting is then cleaned when its recording ends, in the background, about 7 seconds per 250 words on a Mac
+(set `SCRIBE_CLEANUP_AUTO=0` to clean only when asked). The web UI shows its progress, a **clean up** button for older
+meetings, and an original/cleaned switch; agents read the cleaned copy with `get_transcript(cleaned=true)` and start one
+with `clean_transcript`. Every cleaned line passes the model's [safety check](models/cleanup/guard.py) first: where the
+model changed a number, a "not", a speaker or a timestamp, the line stays as spoken, and the page says how many did.
 
 ## Development
 

@@ -36,9 +36,9 @@ def test_bad_token_settings_stop_the_server(server, tmp_path, env):
 
 
 def test_info_says_whether_a_token_is_needed(client, server, monkeypatch):
-    assert client.get("/api/info").json() == {"auth": False}
+    assert client.get("/api/info").json() == {"auth": False, "cleanup": False}
     monkeypatch.setattr(server, "TOKEN", TOKEN)
-    assert client.get("/api/info").json() == {"auth": True}
+    assert client.get("/api/info").json() == {"auth": True, "cleanup": False}
 
 
 @pytest.mark.parametrize(

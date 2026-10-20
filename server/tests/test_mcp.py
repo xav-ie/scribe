@@ -9,6 +9,7 @@ from test_sessions import OTHER, record
 TOOLS = {
     "list_meetings",
     "get_transcript",
+    "clean_transcript",
     "search_transcripts",
     "create_cleanup",
     "finish_cleanup",
