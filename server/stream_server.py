@@ -1263,10 +1263,26 @@ def _chat(system, user, max_tokens):
     return reply["choices"][0]["message"]["content"] or "", reply.get("model")
 
 
+# A word or a phrase of up to 3 words said 5 or more times in a row: a speech
+# recognition loop ("two two two two two ..."). The cleanup model learned to cut
+# one to a single copy, but a long one can tip it into repeating it instead, so
+# it is cut before the model sees it.
+_LOOP = re.compile(
+    r"\b(\w+(?:'\w+)?(?: \w+(?:'\w+)?){0,2}?)(?:[ ,.!?]+\1\b){4,}", re.IGNORECASE
+)
+
+
+def _cut_loops(text):
+    return _LOOP.sub(r"\1", text)
+
+
 def _clean_chunk(lines, chunk, participants):
     """Cleaned texts for the chunk's lines, whether each was kept raw, and the
-    model's name. Every answer goes through guard.guard_lines."""
+    model's name. Every answer goes through guard.guard_lines, against the lines
+    as sent: with recognition loops cut, otherwise as spoken."""
     guard, prompt, _ = _cleanup_kit()
+    spoken = [x for _, _, x in lines[chunk.start : chunk.stop]]
+    lines = [(t, s, _cut_loops(x)) for t, s, x in lines]
     raw = [f"[{t}] {s}: {x}".rstrip() for t, s, x in lines[chunk.start : chunk.stop]]
     # Tokens of the chunk, roughly (meeting English runs about 3.5 to 4
     # characters a token); the answer is about as long as the question.
@@ -1279,11 +1295,7 @@ def _clean_chunk(lines, chunk, participants):
     matches = [guard.LINE.match(line) for line in shown]
     if len(matches) != len(raw) or not all(matches):
         # Can't happen with lines from _raw_lines; keep the chunk raw if it does.
-        return (
-            [x for _, _, x in lines[chunk.start : chunk.stop]],
-            [True] * len(raw),
-            model,
-        )
+        return spoken, [True] * len(raw), model
     # Kept raw: the guard showed the raw line where the model had changed it
     # (or broke the chunk's line format, which keeps the whole chunk raw).
     whole = len(cleaned) != len(raw)
@@ -1291,7 +1303,11 @@ def _clean_chunk(lines, chunk, participants):
         reverted > 0 and shown[i] == raw[i] and (whole or cleaned[i] != raw[i])
         for i in range(len(raw))
     ]
-    return [m.group(3).strip() for m in matches], kept, model
+    # A line kept raw shows what was said, loop and all.
+    texts = [
+        spoken[i] if kept[i] else m.group(3).strip() for i, m in enumerate(matches)
+    ]
+    return texts, kept, model
 
 
 # Runs in progress or waiting, by session id: {"status", "chunksDone", ...}.
