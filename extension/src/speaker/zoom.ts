@@ -7,11 +7,15 @@
 // container applies depends on the user's layout (speaker / bar / gallery), so
 // we check all three.
 //
+// When the tab loses focus Zoom pops the call out into a Document
+// Picture-in-Picture window and moves the video tiles into that window's
+// document, so every lookup covers it too (see meetingDocuments).
+//
 // ⚠️ TUNE ME if Zoom renames these: enable the popup "debug" toggle to log
 // diagnostics from the page console.
 
 import type { SpeakerAdapter, SpeakerDiagnostics } from './types';
-import { isVisible } from './dom';
+import { isVisible, queryAll } from './dom';
 
 // The "this participant is the active speaker" frame, across the three layouts.
 const ACTIVE_FRAMES: readonly string[] = [
@@ -45,7 +49,7 @@ function nameFrom(scope: Element): string | null {
 
 function activeSpeaker(): string | null {
   for (const selector of ACTIVE_FRAMES) {
-    for (const el of document.querySelectorAll(selector)) {
+    for (const el of queryAll(selector)) {
       if (isVisible(el)) {
         const name = nameFrom(el);
         if (name) return name;
@@ -72,8 +76,7 @@ export const zoomAdapter: SpeakerAdapter = {
   // microphone" skips participant-list buttons like "Mute Alice" or "Mute All".
   // ⚠️ TUNE ME; null = don't gate the mic.
   isMuted(): boolean | null {
-    const label = document
-      .querySelector('[aria-label*="my microphone" i]')
+    const label = queryAll('[aria-label*="my microphone" i]')[0]
       ?.getAttribute('aria-label')
       ?.toLowerCase();
     if (label === undefined) return null;
@@ -81,7 +84,7 @@ export const zoomAdapter: SpeakerAdapter = {
   },
 
   diagnose(): SpeakerDiagnostics {
-    const tiles = [...document.querySelectorAll(TILE)].filter(isVisible);
+    const tiles = queryAll(TILE).filter(isVisible);
     return {
       tiles: tiles.length,
       names: tiles.map((t) => nameFrom(t) ?? '?'),
