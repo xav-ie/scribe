@@ -1,5 +1,5 @@
 import mark from '../../assets/logo/mark.svg';
-import { BUILD, getSettings, setSettings, splitServerUrl } from './config';
+import { BUILD, getSettings, setSettings } from './config';
 import {
   getState,
   JOIN_SESSION_KEY,
@@ -26,7 +26,6 @@ const debugToggle = $<HTMLInputElement>('debug');
 const saveAudioToggle = $<HTMLInputElement>('saveAudio');
 const saveAudioNote = $<HTMLElement>('saveAudioNote');
 const exportBtn = $<HTMLButtonElement>('exportDebug');
-const wsUrlEl = $<HTMLElement>('wsUrl');
 const micSetupLink = $<HTMLAnchorElement>('micSetup');
 const errorEl = $<HTMLElement>('error');
 const warningEl = $<HTMLElement>('warning');
@@ -89,12 +88,6 @@ async function init(): Promise<void> {
   const settings = await getSettings();
   debugToggle.checked = settings.debug;
   saveAudioToggle.checked = settings.saveAudio;
-  // The token stays out of sight.
-  wsUrlEl.textContent = 'not set';
-  if (settings.wsUrl) {
-    const { url, token } = splitServerUrl(settings.wsUrl);
-    wsUrlEl.textContent = token ? `${url} (with token)` : url;
-  }
   $<HTMLElement>('build').textContent = BUILD;
 
   render(await getState());
