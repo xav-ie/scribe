@@ -24,6 +24,7 @@ const recordBtn = $<HTMLButtonElement>('record');
 const statusEl = $<HTMLSpanElement>('status');
 const debugToggle = $<HTMLInputElement>('debug');
 const saveAudioToggle = $<HTMLInputElement>('saveAudio');
+const saveAudioNote = $<HTMLElement>('saveAudioNote');
 const exportBtn = $<HTMLButtonElement>('exportDebug');
 const wsUrlEl = $<HTMLElement>('wsUrl');
 const micSetupLink = $<HTMLAnchorElement>('micSetup');
@@ -42,6 +43,10 @@ function render(state: RecState): void {
 
   recordBtn.textContent = LABELS[state.status];
   recordBtn.classList.toggle('recording', state.status === 'recording');
+  // The streaming service is told whether to save audio when a stream opens,
+  // so a change only applies from the next recording.
+  saveAudioToggle.disabled = state.status !== 'idle';
+  saveAudioNote.classList.toggle('hidden', state.status === 'idle');
 
   if (state.error) {
     errorEl.textContent = state.error;
