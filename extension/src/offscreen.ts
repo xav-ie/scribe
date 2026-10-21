@@ -55,6 +55,8 @@ interface StreamOpts {
   debug: boolean;
   /** Names the recording on the streaming service, which saves audio under it. */
   sessionId: string;
+  /** This capture, which the background's state reports are matched to. */
+  captureId: string;
   saveAudio: boolean;
   /** Participant names the streaming service should boost. */
   boost: string[];
@@ -99,14 +101,15 @@ const sendSpan = (ws: WebSocket, span: SpeakerSpan): void =>
 const micMuted = (): boolean =>
   captureTabId !== null && mutedByTab.get(captureTabId) === true;
 
-// Tagged with the recording it's about: a stop's idle can land after the next
-// recording has started, and must not end that one.
-function sendState(sessionId: string, patch: Partial<RecState>): void {
+// Tagged with the capture it's about: a stop's idle can land after the next
+// capture has started (in the same session, if it resumed), and must not end
+// that one.
+function sendState(captureId: string, patch: Partial<RecState>): void {
   chrome.runtime
     .sendMessage({
       type: 'STATE_UPDATE',
       target: 'background',
-      sessionId,
+      captureId,
       patch,
     } satisfies Message)
     .catch(() => {});
@@ -277,7 +280,7 @@ function openChannel(
 
   ws.addEventListener('error', () => {
     if (primary) {
-      sendState(stream.sessionId, {
+      sendState(stream.captureId, {
         status: 'idle',
         error: `Cannot reach streaming service at ${wsUrl}`,
       });
@@ -294,7 +297,7 @@ function openChannel(
       // 1008: the server wants a token this URL doesn't carry, or another one.
       if (session)
         sendState(
-          stream.sessionId,
+          stream.captureId,
           event.code === 1008
             ? {
                 status: 'idle',
@@ -334,7 +337,7 @@ function openChannel(
         warnedSilent = true;
         const device = session.micStream?.getAudioTracks()[0]?.label;
         const which = device ? ` (${device})` : '';
-        sendState(stream.sessionId, {
+        sendState(stream.captureId, {
           warning: `Your microphone${which} is sending pure silence, so your voice isn't being transcribed. Check the input device in your system settings, then restart the recording.`,
         });
       }
@@ -408,7 +411,7 @@ async function addMic(): Promise<void> {
   micOpenedFor = label;
   const track = micStream.getAudioTracks()[0];
   const settings = track?.getSettings() ?? {};
-  sendState(session.stream.sessionId, {
+  sendState(session.stream.captureId, {
     micDevice: `${track?.label || 'unknown device'} (${JSON.stringify({
       deviceId: settings.deviceId,
       groupId: settings.groupId,
@@ -484,6 +487,7 @@ async function start(
       token: opts.token,
       debug: opts.debug,
       sessionId: opts.sessionId,
+      captureId: opts.captureId,
       saveAudio: opts.saveAudio,
       boost: opts.boost,
       micSpeaker: opts.micSpeaker,
@@ -501,13 +505,13 @@ async function start(
     if (gen !== generation) return;
 
     console.log(`[offscreen] streaming started (mic: ${session?.mic != null})`);
-    sendState(opts.sessionId, { status: 'recording' });
+    sendState(opts.captureId, { status: 'recording' });
   } catch (error) {
     if (session) void teardown();
     else release();
     const message = error instanceof Error ? error.message : String(error);
     console.error('[offscreen] start failed:', message);
-    sendState(opts.sessionId, { status: 'idle', error: message });
+    sendState(opts.captureId, { status: 'idle', error: message });
   }
 }
 
@@ -517,9 +521,9 @@ async function stop(): Promise<void> {
   generation++;
   if (!session) return;
   console.log('[offscreen] stop requested');
-  const { sessionId } = session.stream;
+  const { captureId } = session.stream;
   await teardown(true);
-  sendState(sessionId, { status: 'idle' });
+  sendState(captureId, { status: 'idle' });
 }
 
 async function teardown(flush = false): Promise<void> {

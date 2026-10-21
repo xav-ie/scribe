@@ -64,7 +64,7 @@ describe('mergeTranscript', () => {
       epoch: EPOCH,
       words: [w('hi', 1), w('there', 2), w('hello', 4.5), w('back', 6)],
     };
-    const segments = mergeTranscript(tab, [], timeline, 'Me', 900);
+    const segments = mergeTranscript([tab], [], timeline, 'Me', 900);
     expect(segments.map((s) => [s.speaker, s.text])).toEqual([
       ['Ada', 'hi there'],
       // 4.6 s + 0.9 s lead lands in Grace's span: the UI lags the voice.
@@ -74,7 +74,7 @@ describe('mergeTranscript', () => {
 
   it('calls speech before the first speaker event Unknown', () => {
     const tab = { epoch: EPOCH - 10_000, words: [w('early', 0)] };
-    const [segment] = mergeTranscript(tab, [], timeline, 'Me');
+    const [segment] = mergeTranscript([tab], [], timeline, 'Me');
     expect(segment.speaker).toBe('Unknown');
   });
 
@@ -84,7 +84,7 @@ describe('mergeTranscript', () => {
       { epoch: EPOCH + 1000, words: [w('two', 1)] },
       { epoch: EPOCH + 3000, words: [w('four', 1)] },
     ];
-    const segments = mergeTranscript(tab, mic, timeline, 'Me');
+    const segments = mergeTranscript([tab], mic, timeline, 'Me');
     expect(segments.map((s) => `${s.speaker}: ${s.text}`)).toEqual([
       'Ada: one',
       'Me: two',
@@ -93,9 +93,21 @@ describe('mergeTranscript', () => {
     ]);
   });
 
+  it('joins the tab streams of a resumed recording on one clock', () => {
+    const tab = [
+      { epoch: EPOCH, words: [w('before', 1)] },
+      { epoch: EPOCH + 4000, words: [w('after', 2)] },
+    ];
+    const segments = mergeTranscript(tab, [], timeline, 'Me');
+    expect(segments.map((s) => [s.speaker, s.text, s.start])).toEqual([
+      ['Ada', 'before', 0],
+      ['Grace', 'after', 5],
+    ]);
+  });
+
   it('times segments from the first word and keeps its wall clock', () => {
     const tab = { epoch: EPOCH, words: [w('a', 1, 1.2), w('b', 2, 2.2)] };
-    const [segment] = mergeTranscript(tab, [], timeline, 'Me');
+    const [segment] = mergeTranscript([tab], [], timeline, 'Me');
     expect(segment).toEqual({
       speaker: 'Ada',
       start: 0,
@@ -107,7 +119,7 @@ describe('mergeTranscript', () => {
 
   it('skips streams whose clock is not known yet', () => {
     const segments = mergeTranscript(
-      { epoch: null, words: [w('lost', 0)] },
+      [{ epoch: null, words: [w('lost', 0)] }],
       [{ epoch: null, words: [w('lost', 0)] }],
       timeline,
       'Me',

@@ -35,8 +35,8 @@ interface StopRecording {
 interface StateUpdate {
   type: 'STATE_UPDATE';
   target: 'background';
-  /** The recording this is about; patches for any other are ignored. */
-  sessionId: string;
+  /** The capture this is about; patches for any other are ignored. */
+  captureId: string;
   patch: Partial<RecState>;
 }
 
@@ -50,6 +50,8 @@ interface OffscreenStart {
   debug: boolean;
   /** Identifies this recording on the streaming service (and its saved audio). */
   sessionId: string;
+  /** This capture; a resumed session has several under one sessionId. */
+  captureId: string;
   saveAudio: boolean;
   /** Participant names for the streaming service to boost. */
   boost: string[];
