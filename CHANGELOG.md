@@ -1,3 +1,29 @@
+## 0.1.4 (2026-10-21)
+
+### Features
+
+#### Restarting in the same meeting resumes its session
+
+Each session now records its meeting's address (without the query, where Zoom keeps the passcode). Starting a recording in the same meeting within 30 minutes of stopping carries on in that session: one transcript, one set of saved audio with a stream per part, and one record on the server.
+
+### Fixes
+
+#### Meet speakers detected again
+
+Meet now animates the active speaker's audio meter inside a hidden layer, which the extension skipped, so a Meet recording stayed on whoever was detected first. Hidden meters count again, and the speaking rate alone tells the speaker apart.
+
+#### Tidier popup
+
+The options now sit above the record button, the streaming service address is gone (it's on the settings page), and Settings and the debug bundle are links at the bottom.
+
+#### Save audio is set before recording
+
+The "Save audio on the streaming service" checkbox is locked while recording, since a change only applies from the next recording.
+
+#### No false "speaker detection is not running" warning
+
+Recording in a meeting tab opened before the extension was reloaded no longer warns that speaker detection isn't running when it starts a moment later.
+
 ## 0.1.3 (2026-10-21)
 
 ### Fixes
