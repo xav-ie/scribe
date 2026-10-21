@@ -851,6 +851,9 @@ def _read_session(folder):
         session[key] = _number(session.get(key))
     if not isinstance(session.get("platform"), str):
         session["platform"] = None
+    title = session.get("title")
+    title = title.strip()[:200] if isinstance(title, str) else ""
+    session["title"] = title or None
     session["segments"] = [
         seg
         for seg in session.get("segments") or []
@@ -931,6 +934,7 @@ def list_sessions():
                 "sessionId": folder.name,
                 "startedAt": session.get("startedAt"),
                 "stoppedAt": session.get("stoppedAt"),
+                "title": session.get("title"),
                 "platform": session.get("platform"),
                 "speakers": sorted({s["speaker"] for s in segments}),
                 "words": sum(len(s["text"].split()) for s in segments),
@@ -948,6 +952,7 @@ def list_sessions():
                 "sessionId": session_id,
                 "startedAt": None,
                 "stoppedAt": None,
+                "title": None,
                 "platform": None,
                 "speakers": [],
                 "words": 0,
@@ -1690,8 +1695,9 @@ def list_meetings(
     since: str | None = None, until: str | None = None, limit: int = 20
 ) -> list[dict]:
     """Recorded meetings, newest first. since/until are ISO 8601 times bounding
-    when a meeting started (UTC when no offset is given). title is from the
-    newest finished cleanup, and cleanup is the newest cleanup's status.
+    when a meeting started (UTC when no offset is given). title is the
+    meeting's own name (its Meet title), else the newest finished cleanup's,
+    and cleanup is the newest cleanup's status.
     participants is everyone shown in the meeting, speaking or not. cleaned
     says whether the cleanup model made a cleaned copy (get_transcript with
     cleaned=true reads it) and how its latest run went."""
@@ -1702,7 +1708,9 @@ def list_meetings(
         out.append(
             {
                 "sessionId": s["sessionId"],
-                "title": done[-1]["notes"].get("title") if done else None,
+                # The meeting's own name, else the one the cleanup gave it.
+                "title": s["title"]
+                or (done[-1]["notes"].get("title") if done else None),
                 "startedAt": _iso(s["startedAt"]),
                 "stoppedAt": _iso(s["stoppedAt"]),
                 "platform": s["platform"],
@@ -1728,7 +1736,8 @@ def get_transcript(session_id: str, cleaned: bool = False) -> str:
     session = _read_session(_meeting_dir(session_id))
     if not session:
         raise ToolError(f"no transcript for session {session_id}")
-    head = f"Meeting {session_id}, started {_iso(session.get('startedAt'))}, on {session.get('platform')}\nParticipants: {', '.join(_participants(session))}"
+    name = f' "{session["title"]}"' if session.get("title") else ""
+    head = f"Meeting{name} {session_id}, started {_iso(session.get('startedAt'))}, on {session.get('platform')}\nParticipants: {', '.join(_participants(session))}"
     if not cleaned:
         lines = [
             f"[{_clock(s['start'])}] {s['speaker']}: {s['text']}"

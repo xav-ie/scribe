@@ -61,6 +61,15 @@ def test_get_transcript(mcp, meetings):
     ]
 
 
+def test_a_meeting_title_names_the_meeting(client, mcp):
+    client.post(f"/api/sessions/{SID}", json=record(started=JAN, title="Kickoff"))
+    first = mcp["create_cleanup"](SID, model="m")
+    mcp["finish_cleanup"](SID, first["id"], notes={"title": "Generated"})
+    [meeting] = mcp["list_meetings"]()
+    assert meeting["title"] == "Kickoff"
+    assert mcp["get_transcript"](SID).startswith(f'Meeting "Kickoff" {SID},')
+
+
 @pytest.mark.parametrize("sid", [OTHER.replace("a", "f"), "../x"])
 def test_get_transcript_of_nothing(mcp, sid):
     with pytest.raises(ToolError):

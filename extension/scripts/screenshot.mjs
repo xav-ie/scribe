@@ -212,6 +212,7 @@ const session = {
   session: {
     startedAt: t0,
     stoppedAt: t0 + 32 * 60_000,
+    title: 'Release sync',
     platform: 'meet',
     segments: lines.map(([speaker, start, text]) =>
       segment(speaker, start, text),
