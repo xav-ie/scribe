@@ -104,6 +104,7 @@ h2 {
 
 button.primary {
   width: 100%;
+  margin-top: 14px;
   padding: 10px;
   font-size: 14px;
   font-weight: 600;
@@ -152,6 +153,7 @@ button.secondary {
   opacity: 0.6;
 }
 .row small {
+  display: block;
   font-size: 11px;
 }
 
@@ -264,11 +266,24 @@ button.secondary {
   font-size: 12px;
 }
 
+.build .links {
+  display: flex;
+  gap: 12px;
+}
+button.link {
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
 .build {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   margin-top: 12px;
   font: 11px var(--mono);
   color: var(--muted);
-  text-align: right;
 }
 .field code {
   word-break: break-all;

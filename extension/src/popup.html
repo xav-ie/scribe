@@ -13,8 +13,6 @@
       <span id="status" class="status idle">idle</span>
     </header>
 
-    <button id="record" class="primary">Start recording</button>
-
     <section class="options">
       <div class="row">
         <span>My microphone</span>
@@ -35,15 +33,9 @@
         <input type="checkbox" id="debug" />
         <span>Debug: log speaker detection</span>
       </label>
-
-      <button id="exportDebug" class="secondary">Download debug bundle</button>
-
-      <div class="field">
-        <span>Streaming service</span>
-        <code id="wsUrl"></code>
-        <a id="openOptions" href="#" class="link">change in settings</a>
-      </div>
     </section>
+
+    <button id="record" class="primary">Start recording</button>
 
     <div id="error" class="error hidden"></div>
     <div id="warning" class="warning hidden"></div>
@@ -59,7 +51,15 @@
       <div id="transcript" class="script"></div>
     </section>
 
-    <footer id="build" class="build"></footer>
+    <footer class="build">
+      <span class="links">
+        <a id="openOptions" href="#" class="link">Settings</a>
+        <button type="button" id="exportDebug" class="link">
+          Debug bundle
+        </button>
+      </span>
+      <span id="build"></span>
+    </footer>
 
     <script type="module" src="./popup.ts"></script>
   </body>
