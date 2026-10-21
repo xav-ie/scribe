@@ -1,3 +1,11 @@
+## 0.1.3 (2026-10-21)
+
+### Fixes
+
+#### Zoom speakers in picture-in-picture
+
+Switching away from a Zoom tab no longer stops speaker detection. Zoom moves the call into a picture-in-picture window, and the extension now follows it there for the active speaker and your mute state, as it already did for Meet.
+
 ## 0.1.2 (2026-10-20)
 
 ### Features
