@@ -625,8 +625,9 @@ async def _wyoming_client(reader, writer):
 class Recording:
     """One saved stream: the 16 kHz audio fed to the model plus, on close, its words.
 
-    A channel reopened within a session (the mic toggled off and on) gets a
-    numbered stem, so earlier streams are kept.
+    A channel reopened within a session (the mic switching devices, or the
+    recording resumed in the same meeting) gets a numbered stem, so earlier
+    streams are kept.
     """
 
     def __init__(self, session_id, channel, src_rate):

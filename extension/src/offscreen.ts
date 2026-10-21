@@ -314,7 +314,7 @@ function openChannel(
   });
   ws.addEventListener('close', (event) => {
     channel.flushed?.();
-    if (channel.closing) return; // deliberate (stop / mic toggled off)
+    if (channel.closing) return; // deliberate (stop, or the mic switching devices)
     if (primary) {
       // Not closed by us: the recording ended without the user stopping it.
       if (session)
