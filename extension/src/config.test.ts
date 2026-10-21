@@ -6,11 +6,24 @@ import {
   DEFAULT_SETTINGS,
   getSettings,
   grantServerAccess,
+  redactToken,
   saveServerUrl,
   serverOrigins,
   splitServerUrl,
 } from './config';
 import { chromeStub } from './test/chrome';
+
+describe('redactToken', () => {
+  it('replaces the token and keeps the rest', () => {
+    expect(redactToken('wss://scribe.example.com/ws#token=s3cret')).toBe(
+      'wss://scribe.example.com/ws#token=redacted',
+    );
+    expect(redactToken('ws://localhost:8000/ws')).toBe(
+      'ws://localhost:8000/ws',
+    );
+    expect(redactToken('')).toBe('');
+  });
+});
 
 describe('serverOrigins', () => {
   it('covers the socket and the HTTP API on the same host, any port', () => {
