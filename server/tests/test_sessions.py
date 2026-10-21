@@ -37,6 +37,13 @@ def test_post_then_read_a_session(client):
     assert listed["speakers"] == ["Ada", "Unknown"] and listed["words"] == 3
 
 
+def test_a_session_is_listed_with_its_meeting_title(client):
+    client.post(f"/api/sessions/{SID}", json=record(title="  Weekly sync  "))
+    client.post(f"/api/sessions/{OTHER}", json=record(started=2, title=""))
+    titles = {s["sessionId"]: s["title"] for s in client.get("/api/sessions").json()}
+    assert titles == {SID: "Weekly sync", OTHER: None}
+
+
 def test_listing_is_newest_first(client):
     client.post(f"/api/sessions/{SID}", json=record(started=1))
     client.post(f"/api/sessions/{OTHER}", json=record(started=2))
@@ -49,6 +56,7 @@ def test_listing_is_newest_first(client):
         {"segments": "nope", "startedAt": "yesterday"},
         {"segments": [{"speaker": 1}, None, {"text": "x"}], "startedAt": True},
         {"segments": [{"speaker": "A", "text": "t", "start": "0"}], "platform": []},
+        {"segments": [], "title": ["not", "a", "string"]},
     ],
 )
 def test_a_malformed_record_does_not_break_anything(client, mcp, bad):

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { meetingKey, meetingUrl } from './meeting';
+import { meetingKey, meetingTitle, meetingUrl } from './meeting';
 
 describe('meetingUrl', () => {
   it('drops the query, which holds the Zoom passcode', () => {
@@ -39,5 +39,26 @@ describe('meetingKey', () => {
 
   it('is null without a URL', () => {
     expect(meetingKey(null)).toBeNull();
+  });
+});
+
+describe('meetingTitle', () => {
+  it("is Meet's meeting name without the prefix", () => {
+    expect(
+      meetingTitle('Meet - Comfrt Tech / Outsmartly: Project Updates'),
+    ).toBe('Comfrt Tech / Outsmartly: Project Updates');
+    expect(meetingTitle('Meet – Standup')).toBe('Standup');
+  });
+
+  it.each([
+    'Meet - abc-defg-hij',
+    'Google Meet',
+    'Meet',
+    'Zoom',
+    'Zoom Meeting',
+    '',
+    undefined,
+  ])('is null for %j, which names no meeting', (title) => {
+    expect(meetingTitle(title)).toBeNull();
   });
 });

@@ -32,7 +32,7 @@ import {
   type Word,
 } from './transcript';
 import type { Message } from './types';
-import { meetingKey, meetingUrl } from './meeting';
+import { meetingKey, meetingTitle, meetingUrl } from './meeting';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
 // Adapter snapshots arrive every 10 s; keep about two hours of them.
@@ -56,6 +56,8 @@ interface JoinSession {
   stoppedAt: number | null;
   /** The meeting's address, without its query (see meetingUrl). */
   url: string | null;
+  /** The meeting's name from its tab title, when it has one (see meetingTitle). */
+  title: string | null;
   /** The captured tab; only its content script's diagnostics are kept. */
   tabId: number | null;
   /** Meeting client, from the captured tab's host (meet, zoom, or the host). */
@@ -79,6 +81,7 @@ function emptySession(): JoinSession {
     startedAt: null,
     stoppedAt: null,
     url: null,
+    title: null,
     tabId: null,
     platform: null,
     timeline: [],
@@ -222,7 +225,14 @@ async function startRecording(): Promise<void> {
     // Same meeting, stopped moments ago: carry on in that session. Its words
     // and timeline stay, and this capture adds a tab stream (and saved audio)
     // of its own. The earlier record was uploaded; the next upload replaces it.
-    mem = { ...previous, active: true, captureId, url, tabId: tab.id };
+    mem = {
+      ...previous,
+      active: true,
+      captureId,
+      url,
+      title: meetingTitle(tab.title) ?? previous.title,
+      tabId: tab.id,
+    };
     dlog('[bg] resuming session', previous.sessionId);
     await recompute(mem);
   } else {
@@ -233,6 +243,7 @@ async function startRecording(): Promise<void> {
       captureId,
       startedAt: Date.now(),
       url,
+      title: meetingTitle(tab.title),
       tabId: tab.id,
       platform: platformOf(tab.url),
     };
@@ -446,6 +457,12 @@ async function finishSession(): Promise<void> {
   // land here) can't both finish and upload the session.
   s.active = false;
   s.stoppedAt = Date.now();
+  // Meet names the tab after the meeting only once joined; the tab may be
+  // closed by now, leaving the title read at the start.
+  if (s.tabId !== null) {
+    const tab = await chrome.tabs.get(s.tabId).catch(() => {});
+    s.title = meetingTitle(tab?.title) ?? s.title;
+  }
   await recompute(s);
   await flushSession();
   // A start that failed before any stream sent words leaves nothing worth a

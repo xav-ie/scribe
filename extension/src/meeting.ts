@@ -28,3 +28,18 @@ export function meetingKey(url: string | null): string | null {
     : undefined;
   return zoom ? `zoom:${zoom}` : url.replace(/\/$/, '');
 }
+
+// Tab titles that name the client, not the meeting.
+const GENERIC_TITLE = /^(?:zoom(?: meeting| workplace)?|(?:google )?meet)$/i;
+const MEET_CODE = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/;
+
+/**
+ * The meeting's name from its tab title: Meet titles the tab "Meet - <name>"
+ * (the calendar event's, or the meeting code without one). Null when the title
+ * only names the client or the code.
+ */
+export function meetingTitle(tabTitle: string | undefined): string | null {
+  const title = (tabTitle ?? '').replace(/^meet\s*[-–—:]\s*/i, '').trim();
+  if (!title || GENERIC_TITLE.test(title) || MEET_CODE.test(title)) return null;
+  return title;
+}

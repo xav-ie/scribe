@@ -374,7 +374,17 @@
                   ? clock((s.stoppedAt - s.startedAt) / 1000)
                   : "",
             }),
-            el("td", { textContent: s.platform ?? "" }),
+            // The meeting's name with its client, or just the client.
+            el(
+              "td",
+              {},
+              s.title ?? "",
+              el("span", {
+                className: "muted",
+                textContent:
+                  s.title && s.platform ? ` ${s.platform}` : (s.platform ?? ""),
+              }),
+            ),
             el(
               "td",
               {},
@@ -405,7 +415,7 @@
                 ...[
                   "Started",
                   "Length",
-                  "Platform",
+                  "Meeting",
                   "Speakers",
                   "Words",
                   "Audio",
@@ -422,6 +432,7 @@
         const { session, channels, live, cleaned } = await api(
           `/api/sessions/${id}?cleaned=true`,
         );
+        if (session?.title) where.textContent = `/ ${session.title}`;
         if (live) return watchLive(id, session);
 
         // Each saved stream plays against its own clock: the wall-clock epoch of
