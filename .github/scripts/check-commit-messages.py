@@ -15,6 +15,9 @@ SUMMARY_MAX_CHARS = 72  # first line
 BODY_MAX_LINES = 6  # non-empty lines after the first
 BODY_MAX_CHARS = 500  # total, after the first line
 TRAILER = re.compile(r"^[A-Za-z-]+:\s")  # Co-authored-by: and such are metadata
+# GitHub's squash merge: "<PR title> (#12)" over the PR's commits, which the
+# pull_request run already checked; the title and the joined bodies aren't commits we wrote.
+SQUASHED_PR = re.compile(r" \(#\d+\)$")
 
 
 def git(*args):
@@ -31,6 +34,8 @@ def main(rev_range):
         if author.endswith("[bot]"):  # Dependabot and friends write their own
             continue
         summary, *rest = message.strip().split("\n")
+        if SQUASHED_PR.search(summary):
+            continue
         body = [l for l in rest if l.strip() and not TRAILER.match(l.strip())]
         label = f"{sha[:7]} {summary}"
         if len(summary) > SUMMARY_MAX_CHARS:
