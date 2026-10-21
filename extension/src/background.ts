@@ -19,6 +19,7 @@ import { dlog, expose, setDebug } from './debug';
 import type { SpeakerDiagnostics } from './speaker/types';
 import {
   getState,
+  onStateChange,
   JOIN_SESSION_KEY as SESSION_KEY,
   setState,
   type RecState,
@@ -690,6 +691,34 @@ async function reconcileStaleState(): Promise<void> {
     await finishSession();
   }
 }
+
+// The toolbar icon says what the popup would: REC while recording, ! when the
+// last recording ended in an error (a dropped server stops it unseen). Driven
+// by the stored state, so every way the status changes updates it. Colors are
+// the popup palette's readable pairs: white on --button, --bg on --warn.
+function badgeFor({
+  status,
+  error,
+}: RecState): [string, string, string, string] {
+  if (status === 'recording')
+    return ['REC', '#c62818', '#ffffff', 'Meeting Capture: recording'];
+  if (error) return ['!', '#ffd690', '#1d1711', `Meeting Capture: ${error}`];
+  return ['', '#c62818', '#ffffff', 'Meeting Capture'];
+}
+
+function showStatus(state: RecState): void {
+  const [text, color, textColor, title] = badgeFor(state);
+  chrome.action.setBadgeText({ text }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
+  chrome.action.setBadgeTextColor({ color: textColor }).catch(() => {});
+  chrome.action.setTitle({ title }).catch(() => {});
+}
+
+async function initStatus(): Promise<void> {
+  showStatus(await getState());
+}
+onStateChange(showStatus);
+void initStatus();
 
 // The worker is about to be torn down: keep everything the session has so far.
 chrome.runtime.onSuspend.addListener(() => {
