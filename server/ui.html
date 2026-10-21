@@ -422,7 +422,7 @@
         const { session, channels, live, cleaned } = await api(
           `/api/sessions/${id}?cleaned=true`,
         );
-        if (live) return watchLive(id);
+        if (live) return watchLive(id, session);
 
         // Each saved stream plays against its own clock: the wall-clock epoch of
         // its first sample.
@@ -737,15 +737,22 @@
       // each {"type": "words", "from", "words"} update the way the extension
       // does (replace from index `from` on) and joining the words with each
       // stream's clock and speakers into turns. Once every stream has closed,
-      // the saved session is loaded in its place.
+      // the saved session is loaded in its place. A resumed session (the
+      // recording restarted in the same meeting) already has a record of its
+      // earlier parts, shown above the live turns.
       let watching = null;
-      function watchLive(id) {
+      function watchLive(id, earlier) {
         // stream id -> { words, epoch, speakers, open }
         const streams = new Map();
+        const before = (earlier?.segments ?? [])
+          .filter((seg) => seg.at != null)
+          .map((seg) => ({ speaker: seg.speaker, at: seg.at, text: seg.text }));
         const box = el("div", { className: "live" });
         const status = el("p", {
           className: "muted",
-          textContent: "● recording, live",
+          textContent: before.length
+            ? "● recording, live (resumed: the earlier part is above)"
+            : "● recording, live",
         });
         app.replaceChildren(status, box);
         let drawing = false;
@@ -754,7 +761,16 @@
           drawing = true;
           requestAnimationFrame(() => {
             drawing = false;
-            const turns = liveTurns([...streams.values()]);
+            // A stream of the earlier part still finishing is in both; its
+            // live words win.
+            const epochs = [...streams.values()]
+              .map((x) => x.epoch)
+              .filter((e) => e != null);
+            const firstLive = epochs.length ? Math.min(...epochs) : Infinity;
+            const turns = [
+              ...before.filter((turn) => turn.at < firstLive),
+              ...liveTurns([...streams.values()]),
+            ];
             const origin = turns[0]?.at ?? 0;
             box.replaceChildren(
               ...turns.map((turn) =>
@@ -786,7 +802,7 @@
         const ended = () => {
           over = true;
           ws.close();
-          afterLive(id, status).catch((e) => {
+          afterLive(id, status, earlier?.stoppedAt ?? null).catch((e) => {
             status.textContent = String(e);
           });
         };
@@ -835,20 +851,28 @@
       // The streams have ended. The extension posts its record when it stops,
       // which can take a moment; a session that saved no audio has nothing on
       // the server until then, or ever if the upload fails. Keep the live words
-      // on screen meanwhile instead of replacing them with a 404.
-      async function afterLive(id, status) {
+      // on screen meanwhile instead of replacing them with a 404. A resumed
+      // session's earlier record is there all along, so wait for a newer one.
+      async function afterLive(id, status, earlierStop) {
         const here = location.hash;
         status.textContent = "Recording ended. Loading the saved session…";
         for (const wait of [1000, 2000, 4000, 8000]) {
           await sleep(wait);
           if (location.hash !== here) return;
           const r = await fetch(`/api/sessions/${id}`);
-          if (r.ok) return route();
+          if (r.ok) {
+            const { session } = await r.json();
+            if (earlierStop == null || session?.stoppedAt !== earlierStop)
+              return route();
+            continue;
+          }
           if (r.status !== 404)
             throw new HttpError(`/api/sessions/${id}`, r.status);
         }
         status.textContent =
-          "Recording ended. Nothing was saved on the server for this session, so these live words are all there is.";
+          earlierStop == null
+            ? "Recording ended. Nothing was saved on the server for this session, so these live words are all there is."
+            : "Recording ended, but its full record hasn't reached the server yet. Reload in a moment to see it.";
       }
 
       // The global boost list: names and jargon scribe should favour when unsure.
