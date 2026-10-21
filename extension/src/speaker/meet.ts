@@ -20,6 +20,11 @@
 // own document, so detection and the mute check cover it too.
 
 import type { SpeakerAdapter, SpeakerDiagnostics } from './types';
+import {
+  type DocumentPictureInPictureEvent,
+  meetingDocuments,
+  queryAll,
+} from './dom';
 
 const TILE = 'div[data-participant-id]';
 const NAME =
@@ -45,37 +50,6 @@ function isMeter(el: HTMLElement): boolean {
     el.childElementCount === 0 &&
     (el.textContent ?? '').trim() === ''
   );
-}
-
-// Document Picture-in-Picture isn't in TypeScript's DOM lib yet.
-interface DocumentPictureInPictureEvent extends Event {
-  readonly window: Window;
-}
-interface DocumentPictureInPicture {
-  readonly window: Window | null;
-  addEventListener(
-    type: 'enter',
-    listener: (e: DocumentPictureInPictureEvent) => void,
-  ): void;
-  removeEventListener(
-    type: 'enter',
-    listener: (e: DocumentPictureInPictureEvent) => void,
-  ): void;
-}
-declare global {
-  var documentPictureInPicture: DocumentPictureInPicture | undefined;
-}
-
-// The page, plus Meet's picture-in-picture window while it's open.
-function meetingDocuments(): Document[] {
-  const pip = globalThis.documentPictureInPicture?.window?.document;
-  return pip ? [document, pip] : [document];
-}
-
-function queryAll<E extends Element>(selector: string): E[] {
-  return meetingDocuments().flatMap((d) => [
-    ...d.querySelectorAll<E>(selector),
-  ]);
 }
 
 let lastDetected: string | null = null;
