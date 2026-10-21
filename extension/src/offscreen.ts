@@ -185,9 +185,21 @@ async function openMicStream(
     });
   } catch (error) {
     console.warn('[offscreen] mic capture failed', error);
+    if (session)
+      sendState(session.stream.captureId, { warning: micWarning(error) });
     return null;
   }
 }
+
+function micWarning(error: unknown): string {
+  if (error instanceof DOMException && error.name === 'NotAllowedError')
+    return "Microphone access isn't granted, so your own voice isn't transcribed. Grant it from this popup, then restart the recording.";
+  const why = error instanceof Error ? ` (${error.message})` : '';
+  return `Your microphone couldn't be opened${why}, so your own voice isn't transcribed. Check the device, then restart the recording.`;
+}
+
+const MIC_DROPPED =
+  "Your microphone's stream to the server dropped, so your own voice is no longer transcribed. Restart the recording to bring it back.";
 
 // Float32 [-1,1] → little-endian int16 PCM. The scribe service resamples to
 // 16 kHz server-side, so we send at the AudioContext's native rate and just
@@ -288,6 +300,7 @@ function openChannel(
     } else {
       console.warn('[offscreen] mic stream error; dropping mic');
       removeMic();
+      sendState(stream.captureId, { warning: MIC_DROPPED });
     }
   });
   ws.addEventListener('close', (event) => {
@@ -309,6 +322,7 @@ function openChannel(
       void teardown();
     } else {
       removeMic();
+      sendState(stream.captureId, { warning: MIC_DROPPED });
     }
   });
 
@@ -473,6 +487,14 @@ async function start(
         'Tab capture returned no audio track — nothing to record.',
       );
     tabAudio.enabled = true;
+    // The meeting tab closed (or its capture ended): nothing is left to
+    // record, and the mic must not go on transcribing you. Stopping a track
+    // ourselves doesn't fire this, so only a capture ending on its own does.
+    tabAudio.addEventListener('ended', () => {
+      void stop({
+        warning: 'The meeting tab closed, so the recording stopped.',
+      });
+    });
 
     ctx = new AudioContext();
     await ctx.resume().catch(() => {});
@@ -517,13 +539,13 @@ async function start(
 
 // Idle is reported once the server's last words are in, so the background
 // finishes the session with them.
-async function stop(): Promise<void> {
+async function stop(why: Partial<RecState> = {}): Promise<void> {
   generation++;
   if (!session) return;
   console.log('[offscreen] stop requested');
   const { captureId } = session.stream;
   await teardown(true);
-  sendState(captureId, { status: 'idle' });
+  sendState(captureId, { ...why, status: 'idle' });
 }
 
 async function teardown(flush = false): Promise<void> {
