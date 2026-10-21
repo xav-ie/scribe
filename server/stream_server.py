@@ -1120,8 +1120,10 @@ async def ws(websocket: WebSocket):
             msg = await inbox.get()
             backlog -= len(msg.get("bytes") or b"")
             if overflow:
+                # 1013 (try again later), not 1008: clients read 1008 as a
+                # token problem.
                 await websocket.close(
-                    1008, "audio arriving faster than it can be transcribed"
+                    1013, "audio arriving faster than it can be transcribed"
                 )
                 break
             if msg.get("type") == "websocket.disconnect":

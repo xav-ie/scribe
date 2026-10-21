@@ -212,4 +212,4 @@ def test_a_stream_too_far_ahead_is_cut_off(client, server, monkeypatch):
         ws.send_bytes(pcm(STEP * 4))
         with pytest.raises(WebSocketDisconnect) as closed:
             ws.receive_text()
-    assert closed.value.code == 1008
+    assert closed.value.code == 1013
