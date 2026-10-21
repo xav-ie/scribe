@@ -14,6 +14,7 @@ import type { SpeakerAdapter } from './types';
 
 const ADAPTERS: readonly SpeakerAdapter[] = [meetAdapter, zoomAdapter];
 const MAX_PROBES = 6;
+const MUTE_POLL_MS = 100;
 const adapter = ADAPTERS.find((a) => a.matches(location.host));
 
 // CRXJS's loader imports this module, which runs once per page context, then
@@ -66,16 +67,18 @@ function start(adapter: SpeakerAdapter): void {
   // silence (no recording) while muted. null = can't detect → don't gate.
   // Only a frame showing the meeting's participants reports: other frames of
   // the tab can hold mic-labelled controls that aren't the meeting's own.
+  // Polled often, since until a change lands the first words after unmuting
+  // are silenced; the tile count is only read once the state has changed.
   let lastMuted: boolean | null = null;
   const reportMuted = (): void => {
-    if (adapter.diagnose().tiles === 0) return;
     const muted = adapter.isMuted?.() ?? null;
     if (muted === null || muted === lastMuted) return;
+    if (adapter.diagnose().tiles === 0) return;
     lastMuted = muted;
     dlog('[speaker] muted:', muted);
     send({ type: 'MUTE_STATE', target: 'offscreen', muted });
   };
-  timers.push(setInterval(reportMuted, 500));
+  timers.push(setInterval(reportMuted, MUTE_POLL_MS));
 
   // The mic the meeting itself opened, recorded on <html> by public/mic-hook.js
   // from the page's own world. Reported on change and at each start, like mute.
