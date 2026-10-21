@@ -292,7 +292,7 @@ function openChannel(
   });
   ws.addEventListener('close', (event) => {
     channel.flushed?.();
-    if (channel.closing) return; // deliberate (stop / mic toggled off)
+    if (channel.closing) return; // deliberate (stop, or the mic switching devices)
     if (primary) {
       // 1008: the server wants a token this URL doesn't carry, or another one.
       if (session)

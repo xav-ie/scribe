@@ -9,8 +9,8 @@
 //
 // The local mic is a SEPARATE stream (not mixed into the tab audio) and is
 // always attributed to the local user — it's the one voice we can label with
-// certainty, even while muted, where the active-speaker UI would (wrongly) show
-// someone else.
+// certainty, even when the active-speaker UI shows someone else. While you're
+// muted the offscreen sends it silence, so it adds no words.
 
 /** One decoded word; `start`/`end` are seconds from the audio stream start. */
 export interface Word {

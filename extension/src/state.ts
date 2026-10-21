@@ -10,7 +10,7 @@ export interface RecState {
   status: RecordingStatus;
   /** Speaker-attributed transcript, recomputed live as words + speaker events arrive. */
   segments?: Segment[];
-  /** Cumulative un-attributed ASR text — shown before any speaker events land. */
+  /** The tab's words without speakers; the popup's fallback when there are no segments. */
   rawText?: string;
   /** Present when the last run failed. Cleared on the next start. */
   error?: string;

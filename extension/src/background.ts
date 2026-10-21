@@ -42,7 +42,7 @@ const MAX_DIAGNOSTICS = 720;
 const RESUME_WITHIN_MS = 30 * 60_000;
 
 // The local mic is always attributed to the user — it's the one voice we can
-// label with certainty, even while muted. (Make this their name if preferred.)
+// label with certainty. (Make this their name if preferred.)
 const MIC_SPEAKER = 'Me';
 
 interface JoinSession {

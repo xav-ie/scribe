@@ -102,7 +102,7 @@ const grantMicBtn = $<HTMLButtonElement>('grantMic');
 const micStateEl = $<HTMLElement>('micState');
 
 const MIC_TEXT: Record<PermissionState | 'unknown', string> = {
-  granted: 'Allowed. You can turn on Capture my microphone in the popup.',
+  granted: 'Allowed. Every recording includes your microphone.',
   denied:
     "Blocked. Allow it for this extension in Chrome's microphone settings (chrome://settings/content/microphone), and check that your system lets Chrome use the microphone.",
   prompt: 'Not allowed yet.',
