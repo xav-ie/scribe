@@ -31,10 +31,15 @@ import {
   type Word,
 } from './transcript';
 import type { Message } from './types';
+import { meetingKey, meetingUrl } from './meeting';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
 // Adapter snapshots arrive every 10 s; keep about two hours of them.
 const MAX_DIAGNOSTICS = 720;
+
+// Restarting a recording in the same meeting this soon after the last one
+// stopped resumes that session: one transcript and one set of saved audio.
+const RESUME_WITHIN_MS = 30 * 60_000;
 
 // The local mic is always attributed to the user — it's the one voice we can
 // label with certainty, even while muted. (Make this their name if preferred.)
@@ -44,16 +49,21 @@ interface JoinSession {
   active: boolean;
   /** Names this recording on the streaming service, including its saved audio. */
   sessionId: string | null;
+  /** Names the current capture; the offscreen tags its reports with it. */
+  captureId: string | null;
   startedAt: number | null;
+  stoppedAt: number | null;
+  /** The meeting's address, without its query (see meetingUrl). */
+  url: string | null;
   /** The captured tab; only its content script's diagnostics are kept. */
   tabId: number | null;
   /** Meeting client, from the captured tab's host (meet, zoom, or the host). */
   platform: string | null;
   timeline: SpeakerSpan[];
-  tabWords: Word[];
-  tabEpoch: number | null;
-  /** One entry per mic stream: toggling the mic off and on opens a new one. */
-  mic: MicStream[];
+  /** One entry per capture: resuming the session opens a new one. */
+  tab: Stream[];
+  /** One entry per mic stream: the mic reopening (a new device) opens a new one. */
+  mic: Stream[];
   /** What the platform adapter saw during the recording, for debug bundles. */
   diagnostics: (SpeakerDiagnostics & { platform: string; at: number })[];
 }
@@ -64,18 +74,20 @@ function emptySession(): JoinSession {
   return {
     active: false,
     sessionId: null,
+    captureId: null,
     startedAt: null,
+    stoppedAt: null,
+    url: null,
     tabId: null,
     platform: null,
     timeline: [],
-    tabWords: [],
-    tabEpoch: null,
+    tab: [],
     mic: [],
     diagnostics: [],
   };
 }
 
-interface MicStream extends Channel {
+interface Stream extends Channel {
   words: Word[];
   epoch: number;
 }
@@ -103,7 +115,11 @@ let recomputeTimer: ReturnType<typeof setTimeout> | undefined;
 async function session(): Promise<JoinSession> {
   if (mem) return mem;
   loading ??= chrome.storage.local.get(SESSION_KEY).then((stored) => {
-    mem ??= (stored[SESSION_KEY] as JoinSession | undefined) ?? emptySession();
+    // Over the defaults, so a copy saved by an older version gains new fields.
+    mem ??= {
+      ...emptySession(),
+      ...(stored[SESSION_KEY] as Partial<JoinSession> | undefined),
+    };
     return mem;
   });
   return loading;
@@ -155,16 +171,14 @@ async function ensureOffscreenDocument(): Promise<void> {
 async function recompute(s: JoinSession): Promise<void> {
   clearTimeout(recomputeTimer);
   recomputeTimer = undefined;
-  const segments = mergeTranscript(
-    { words: s.tabWords, epoch: s.tabEpoch },
-    s.mic,
-    s.timeline,
-    MIC_SPEAKER,
-  );
+  const segments = mergeTranscript(s.tab, s.mic, s.timeline, MIC_SPEAKER);
   dlog('[bg] recompute:', segments.length, 'segments | distinct speakers:', [
     ...new Set(segments.map((x) => x.speaker)),
   ]);
-  const rawText = s.tabWords.map((w) => w.word).join(' ');
+  const rawText = s.tab
+    .flatMap((t) => t.words)
+    .map((w) => w.word)
+    .join(' ');
   await setState({ segments, rawText });
 }
 
@@ -199,20 +213,34 @@ async function startRecording(): Promise<void> {
   const previous = await session();
   if (previous.active) await finishSession();
 
-  const sessionId = crypto.randomUUID();
-  mem = {
-    ...emptySession(),
-    active: true,
-    sessionId,
-    startedAt: Date.now(),
-    tabId: tab.id,
-    platform: platformOf(tab.url),
-  };
+  const url = meetingUrl(tab.url);
+  const captureId = crypto.randomUUID();
+  const resumed = resumes(previous, url) ? previous.sessionId : null;
+  const sessionId = resumed ?? crypto.randomUUID();
+  if (resumed) {
+    // Same meeting, stopped moments ago: carry on in that session. Its words
+    // and timeline stay, and this capture adds a tab stream (and saved audio)
+    // of its own. The earlier record was uploaded; the next upload replaces it.
+    mem = { ...previous, active: true, captureId, url, tabId: tab.id };
+    dlog('[bg] resuming session', previous.sessionId);
+    await recompute(mem);
+  } else {
+    mem = {
+      ...emptySession(),
+      active: true,
+      sessionId,
+      captureId,
+      startedAt: Date.now(),
+      url,
+      tabId: tab.id,
+      platform: platformOf(tab.url),
+    };
+  }
   resyncRequested = false;
   await flushSession();
   // Stop can land during any of the waits below; it ends the session, and
   // this start must then not go on to capture.
-  const stopped = () => mem?.sessionId !== sessionId || !mem.active;
+  const stopped = () => mem?.captureId !== captureId || !mem.active;
 
   await ensureOffscreenDocument();
 
@@ -233,7 +261,7 @@ async function startRecording(): Promise<void> {
   });
   if (stopped()) return;
 
-  capturing = sessionId;
+  capturing = captureId;
   const server = splitServerUrl(settings.wsUrl);
   chrome.runtime
     .sendMessage({
@@ -244,6 +272,7 @@ async function startRecording(): Promise<void> {
       token: server.token,
       debug: settings.debug,
       sessionId,
+      captureId,
       saveAudio: settings.saveAudio,
       boost,
       tabId: tab.id,
@@ -259,6 +288,17 @@ async function startRecording(): Promise<void> {
   if (detecting !== true) await setState({ warning: detecting });
   checkServerToken(settings.wsUrl).catch(() => {});
   uploadUnsent().catch(() => {});
+}
+
+function resumes(previous: JoinSession, url: string | null): boolean {
+  const key = meetingKey(url);
+  return (
+    key !== null &&
+    previous.sessionId !== null &&
+    previous.stoppedAt !== null &&
+    Date.now() - previous.stoppedAt < RESUME_WITHIN_MS &&
+    meetingKey(previous.url) === key
+  );
 }
 
 // Ask the server whether it requires a token; the popup warns while it
@@ -346,7 +386,7 @@ async function startSpeakerDetection(
   return 'Speaker detection is not running on this tab, so everyone will show as Unknown and muting is not detected. Reload the meeting tab and start again.';
 }
 
-// The session the offscreen document was told to capture.
+// The capture the offscreen document was told to start.
 let capturing: string | null = null;
 // After a stop, the offscreen document waits for each stream's last words and
 // then reports idle, which finishes the session; this is the backstop.
@@ -363,10 +403,10 @@ async function stopRecording(): Promise<void> {
     } satisfies Message)
     .catch(() => {});
   await setState({ status: 'idle' });
-  const id = mem?.sessionId;
+  const id = mem?.captureId;
   if (id && capturing === id) {
     setTimeout(() => {
-      if (mem?.sessionId === id) finishSession().catch(() => {});
+      if (mem?.captureId === id) finishSession().catch(() => {});
     }, FINISH_TIMEOUT_MS);
   } else {
     // Stopped before capture began: nothing to wait for.
@@ -392,6 +432,7 @@ async function finishSession(): Promise<void> {
   // Before any await, so the stop button and the offscreen doc going idle (both
   // land here) can't both finish and upload the session.
   s.active = false;
+  s.stoppedAt = Date.now();
   await recompute(s);
   await flushSession();
   if (!s.sessionId) return;
@@ -400,7 +441,6 @@ async function finishSession(): Promise<void> {
   await updateUnsent((unsent) => {
     unsent[sessionId] = {
       ...s,
-      stoppedAt: Date.now(),
       extensionVersion: BUILD,
       segments,
       rawText,
@@ -449,15 +489,18 @@ async function uploadEach(): Promise<void> {
   if (!wsUrl) return;
   try {
     for (const id of ids) {
+      const body = JSON.stringify(unsent[id]);
       const res = await fetch(apiUrl(wsUrl, `/api/sessions/${id}`), {
         signal: AbortSignal.timeout(15_000),
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...apiHeaders(wsUrl) },
-        body: JSON.stringify(unsent[id]),
+        body,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // A resumed session queues a newer record under the same id, which may
+      // land while this one uploads; it must stay queued.
       await updateUnsent((latest) => {
-        delete latest[id];
+        if (JSON.stringify(latest[id]) === body) delete latest[id];
       });
       dlog('[bg] session uploaded:', id);
     }
@@ -479,18 +522,15 @@ async function onTranscriptUpdate(
 ): Promise<void> {
   const s = await session();
   if (!s.active) return;
-  let target: Word[];
-  if (channel === 'mic') {
-    let stream = s.mic.find((c) => c.epoch === captureStartEpoch);
-    if (!stream) {
-      stream = { words: [], epoch: captureStartEpoch };
-      s.mic.push(stream);
-    }
-    target = stream.words;
-  } else {
-    s.tabEpoch = captureStartEpoch;
-    target = s.tabWords;
+  // Streams are told apart by their clock: a stream of the previous capture
+  // can still be sending its last words after the session resumed.
+  const streams = channel === 'mic' ? s.mic : s.tab;
+  let stream = streams.find((c) => c.epoch === captureStartEpoch);
+  if (!stream) {
+    stream = { words: [], epoch: captureStartEpoch };
+    streams.push(stream);
   }
+  const target = stream.words;
   // Updates only carry new words, so one starting past what we hold means words
   // went missing: ask the offscreen doc to resend its full lists.
   if (!applyWords(target, from, words)) {
@@ -551,15 +591,16 @@ async function onSpeakerEvent(
   scheduleRecompute();
 }
 
-// The offscreen document reporting on a recording: started, failed, or done
-// (its last words in). A late report about an earlier recording is dropped.
+// The offscreen document reporting on a capture: started, failed, or done
+// (its last words in). A late report about an earlier capture is dropped,
+// including one from before this session resumed.
 async function onStateUpdate(
-  sessionId: string,
+  captureId: string,
   patch: Partial<RecState>,
 ): Promise<void> {
   const s = await session();
-  if (sessionId !== s.sessionId) {
-    dlog('[bg] state dropped (earlier recording):', sessionId, patch);
+  if (captureId !== s.captureId) {
+    dlog('[bg] state dropped (earlier capture):', captureId, patch);
     return;
   }
   if (patch.status !== undefined) clearTimeout(startTimer);
@@ -601,7 +642,7 @@ chrome.runtime.onMessage.addListener((message: Message, sender) => {
       break;
     }
     case 'STATE_UPDATE': {
-      onStateUpdate(message.sessionId, message.patch).catch(() => {});
+      onStateUpdate(message.captureId, message.patch).catch(() => {});
       break;
     }
     case 'TRANSCRIPT_UPDATE': {

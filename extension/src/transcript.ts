@@ -77,38 +77,41 @@ function speakerAt(timeline: readonly SpeakerSpan[], epoch: number): string {
   return name;
 }
 
+// A stream's words at their wall-clock time (its clock plus the word's middle),
+// each labelled by `speaker`. None until the stream's clock is known.
+function stamp(
+  stream: Channel,
+  speaker: (at: number) => string,
+): { at: number; speaker: string; word: string }[] {
+  const { epoch } = stream;
+  if (epoch === null) return [];
+  return stream.words.map((w) => {
+    const at = epoch + ((w.start + w.end) / 2) * 1000;
+    return { at, speaker: speaker(at), word: w.word };
+  });
+}
+
 /**
- * Merge the tab stream (attributed via the active-speaker timeline) and the mic
- * streams (always the local user) into one time-ordered, speaker-grouped script.
+ * Merge the tab streams (attributed via the active-speaker timeline; one per
+ * capture, so a resumed recording has several) and the mic streams (always the
+ * local user) into one time-ordered, speaker-grouped script.
  * Each word is stamped with its wall-clock time (`epoch + wordSeconds*1000`) so
  * the two independently-timed streams interleave correctly; `start`/`end` on the
  * returned segments are seconds from the first word.
  */
 export function mergeTranscript(
-  tab: Channel,
+  tab: readonly Channel[],
   mic: readonly Channel[],
   timeline: readonly SpeakerSpan[],
   micName: string,
   leadMs: number = DEFAULT_SPEAKER_LEAD_MS,
 ): Segment[] {
-  const stamped: { at: number; speaker: string; word: string }[] = [];
-  if (tab.epoch !== null) {
-    for (const w of tab.words) {
-      const at = tab.epoch + ((w.start + w.end) / 2) * 1000;
-      stamped.push({
-        at,
-        speaker: speakerAt(timeline, at + leadMs),
-        word: w.word,
-      });
-    }
-  }
-  for (const stream of mic) {
-    if (stream.epoch === null) continue;
-    for (const w of stream.words) {
-      const at = stream.epoch + ((w.start + w.end) / 2) * 1000;
-      stamped.push({ at, speaker: micName, word: w.word });
-    }
-  }
+  const stamped = [
+    ...tab.flatMap((stream) =>
+      stamp(stream, (at) => speakerAt(timeline, at + leadMs)),
+    ),
+    ...mic.flatMap((stream) => stamp(stream, () => micName)),
+  ];
   stamped.sort((a, b) => a.at - b.at);
 
   const origin = stamped.length > 0 ? stamped[0].at : 0;
