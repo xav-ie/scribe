@@ -42,14 +42,13 @@ function tileName(tile: Element): string | null {
   );
 }
 
-// The audio meter: a visible leaf (no children), text-less node. Hover tooltips
-// have children + ~100 chars of text, so this shape filters them out.
+// The audio meter: a leaf (no children), text-less node. Hover tooltips have
+// children + ~100 chars of text, so this shape filters them out. Visibility is
+// not checked: Meet animates the speaker's meter inside a display:none layer
+// (2026-10), while the visible meters barely change, so the rate threshold is
+// what separates speaking from idle.
 function isMeter(el: HTMLElement): boolean {
-  return (
-    el.offsetParent !== null &&
-    el.childElementCount === 0 &&
-    (el.textContent ?? '').trim() === ''
-  );
+  return el.childElementCount === 0 && (el.textContent ?? '').trim() === '';
 }
 
 let lastDetected: string | null = null;
@@ -64,9 +63,9 @@ export const meetAdapter: SpeakerAdapter = {
     const counts = new Map<HTMLElement, number>();
     // Watch the whole page, not the grid: Meet rebuilds the grid when people
     // join or someone presents, so a root picked at join time goes stale and
-    // hides everyone who arrived later. Cheap checks first; offsetParent forces
-    // layout, so it runs last. Nodes in the picture-in-picture window belong to
-    // its own realm, where `instanceof HTMLElement` is false, hence nodeType.
+    // hides everyone who arrived later. Nodes in the picture-in-picture window
+    // belong to its own realm, where `instanceof HTMLElement` is false, hence
+    // nodeType.
     const observer = new MutationObserver((mutations) => {
       for (const m of mutations) {
         const t = m.target as HTMLElement;
