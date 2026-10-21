@@ -310,6 +310,9 @@ async function failSilentStart(): Promise<void> {
 }
 
 const SPEAKER_PLATFORMS = new Set(['meet', 'zoom']);
+// How long a freshly injected speaker script gets to come up: 20 × 150 ms.
+const INJECT_POLLS = 20;
+const INJECT_POLL_MS = 150;
 
 // Ask the meeting tab's content script to re-emit the current speaker and mute
 // state, seeding the timeline from the first word. Chrome only injects declared
@@ -342,7 +345,12 @@ async function startSpeakerDetection(
   } catch (error) {
     dlog('[bg] speaker script injection failed:', errorMessage(error));
   }
-  if (await reset()) return true;
+  // The injected loader only starts an async import of the script, which
+  // registers its listener once loaded, so executeScript resolves first.
+  for (let i = 0; i < INJECT_POLLS; i++) {
+    if (await reset()) return true;
+    await new Promise((resolve) => setTimeout(resolve, INJECT_POLL_MS));
+  }
   return 'Speaker detection is not running on this tab, so everyone will show as Unknown and muting is not detected. Reload the meeting tab and start again.';
 }
 
