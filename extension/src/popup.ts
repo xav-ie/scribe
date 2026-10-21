@@ -1,5 +1,5 @@
 import mark from '../../assets/logo/mark.svg';
-import { BUILD, getSettings, setSettings } from './config';
+import { BUILD, getSettings, redactToken, setSettings } from './config';
 import {
   getState,
   JOIN_SESSION_KEY,
@@ -123,8 +123,9 @@ $<HTMLAnchorElement>('openOptions').addEventListener('click', (event) => {
 
 // Everything needed to diagnose the last recording in one file: the transcript,
 // the join inputs (speaker timeline, per-stream words and clocks, adapter
-// snapshots) and the settings it ran with. The sessionId matches the audio the
-// streaming service saved, if "save audio" was on.
+// snapshots) and the settings it ran with, minus the server's access token:
+// bundles get shared, and the token reads every meeting. The sessionId matches
+// the audio the streaming service saved, if "save audio" was on.
 async function exportDebugBundle(): Promise<void> {
   const [settings, recState, stored] = await Promise.all([
     getSettings(),
@@ -136,7 +137,7 @@ async function exportDebugBundle(): Promise<void> {
   const bundle = {
     exportedAt: new Date().toISOString(),
     extensionVersion: BUILD,
-    settings,
+    settings: { ...settings, wsUrl: redactToken(settings.wsUrl) },
     recState,
     session: session ?? null,
   };

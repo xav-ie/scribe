@@ -42,6 +42,13 @@ export function splitServerUrl(wsUrl: string): { url: string; token?: string } {
   return { url: url.href, token };
 }
 
+/** The server URL with its token replaced, for anything that may be shared. */
+export function redactToken(wsUrl: string): string {
+  if (!wsUrl) return wsUrl;
+  const { url, token } = splitServerUrl(wsUrl);
+  return token ? `${url}#token=redacted` : url;
+}
+
 /** The server's HTTP API at `path`, on the same host as its WebSocket. */
 export function apiUrl(wsUrl: string, path: string): URL {
   const url = new URL(path, splitServerUrl(wsUrl).url);
