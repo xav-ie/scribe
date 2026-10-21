@@ -413,7 +413,11 @@ async function stopRecording(): Promise<void> {
     .catch(() => {});
   await setState({ status: 'idle' });
   const id = mem?.captureId;
-  if (id && capturing === id) {
+  // `capturing` is lost when the worker restarts mid-recording; the offscreen
+  // document then tells whether a capture may still be flushing its words.
+  const flushing =
+    capturing === id || (capturing === null && (await hasOffscreenDocument()));
+  if (id && flushing) {
     setTimeout(() => {
       if (mem?.captureId === id) finishSession().catch(() => {});
     }, FINISH_TIMEOUT_MS);
@@ -444,7 +448,9 @@ async function finishSession(): Promise<void> {
   s.stoppedAt = Date.now();
   await recompute(s);
   await flushSession();
-  if (!s.sessionId) return;
+  // A start that failed before any stream sent words leaves nothing worth a
+  // record; uploading it would only add a blank session to the server.
+  if (!s.sessionId || (s.tab.length === 0 && s.mic.length === 0)) return;
   const { segments = [], rawText = '' } = await getState();
   const { sessionId } = s;
   await updateUnsent((unsent) => {
