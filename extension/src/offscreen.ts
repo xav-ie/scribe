@@ -213,6 +213,15 @@ function floatToInt16(input: Float32Array): ArrayBuffer {
   return out.buffer;
 }
 
+// Why the server closed a stream we didn't: 1008 means it wants a token this
+// URL doesn't carry, or another one.
+function closedWhy(event: CloseEvent): string {
+  if (event.code === 1008)
+    return 'The server needs its access token. Copy the URL from its web UI (pair extension) into the settings page.';
+  const reason = event.reason ? `: ${event.reason}` : '';
+  return `The streaming service ended the recording${reason}. Start it again to continue.`;
+}
+
 // Wire one audio source through a PCM-tap worklet to its own WebSocket. The tab
 // channel is `primary`: its socket dropping ends the whole session, whereas the
 // mic dropping just removes the mic.
@@ -307,18 +316,12 @@ function openChannel(
     channel.flushed?.();
     if (channel.closing) return; // deliberate (stop / mic toggled off)
     if (primary) {
-      // 1008: the server wants a token this URL doesn't carry, or another one.
+      // Not closed by us: the recording ended without the user stopping it.
       if (session)
-        sendState(
-          stream.captureId,
-          event.code === 1008
-            ? {
-                status: 'idle',
-                error:
-                  'The server needs its access token. Copy the URL from its web UI (pair extension) into the settings page.',
-              }
-            : { status: 'idle' },
-        );
+        sendState(stream.captureId, {
+          status: 'idle',
+          error: closedWhy(event),
+        });
       void teardown();
     } else {
       removeMic();
