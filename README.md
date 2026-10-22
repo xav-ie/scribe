@@ -328,6 +328,28 @@ meetings, and an original/cleaned switch; agents read the cleaned copy with `get
 with `clean_transcript`. Every cleaned line passes the model's [safety check](models/cleanup/guard.py) first: where the
 model changed a number, a "not", a speaker or a timestamp, the line stays as spoken, and the page says how many did.
 
+## Optional voice correction
+
+The meeting's speaker indicator lags, and now and then lights the wrong tile, so the words around a change of speaker
+can land on the wrong person. Voice correction fixes that after the meeting: it learns each speaker's voice from the
+saved audio, then moves the words whose voice clearly belongs to someone else. Turn on **Correct speakers by voice** in
+the extension's popup before recording. The server keeps the meeting's audio until the correction is done, and drops
+it afterwards unless **Save audio** is on too.
+
+<!-- diagram:voices -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="models/diagrams/voices-dark.svg">
+  <img src="models/diagrams/voices.svg" alt="Voice correction takes the saved tab audio and the speaker timeline, where the indicator switched to Grace at 1:52 while Ada was still talking (&quot;[1:48] Ada: so the default&quot;, &quot;[1:52] Grace: sounds like seventy, unless you change it per product&quot;). It learns a voiceprint per speaker from speech well inside their turns, then re-checks every stretch of speech 1.5 seconds at a time, moving a word only when its voice clearly belongs to someone else; the mic is always the local user. The corrected transcript gives Ada the words up to 1:55 (&quot;[1:48] Ada: so the default sounds like seventy,&quot;, &quot;[1:55] Grace: unless you change it per product&quot;); cleanup and agents read it, and the original stays the record">
+</picture>
+<!-- /diagram:voices -->
+
+It runs in the background when the recording ends, about a minute and a half for a 25 minute meeting on a CPU, and the
+cleanup, when on, runs after it on the corrected transcript. The web UI shows what changed, each change playable, and
+a **correct speakers by voice** button for any older meeting with saved audio; agents start one with
+`correct_speakers`. The original transcript stays the record: the correction is a separate `voices.json`. It runs on
+the CPU by default, on Linux and on a Mac alike, leaving the GPU to live transcription; set `SCRIBE_VOICES_DEVICE` to
+`cuda` or `mps` to move it.
+
 ## Models
 
 scribe turns speech into text with NVIDIA Parakeet, live. Alongside it, **scribe cleanup v1** is an optional small
@@ -338,7 +360,6 @@ you](#optional-cleanup) when you point it at one. See [models/](models/README.md
 and how it compares with other models.
 
 <!-- table:comparison-verdict -->
-
 In short: scribe cleanup makes the fewest errors and drops 0.5% of real words; the dictation models drop 4.5% to 15.5%, and lose a "not" in 1.8% to 29.1% of meeting chunks.
 <!-- /table:comparison-verdict -->
 

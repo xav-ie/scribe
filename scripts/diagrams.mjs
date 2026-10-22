@@ -203,6 +203,31 @@ const diagrams = {
     };
   },
 
+  voices() {
+    const x = M, w = W - 2 * M;
+    const heard = ["[1:48] Ada: so the default", "[1:52] Grace: sounds like seventy, unless you change it per product"];
+    const fixed = ["[1:48] Ada: so the default sounds like seventy,", "[1:55] Grace: unless you change it per product"];
+    const a = { x, y: 24, w, h: 128, mono: heard,
+                text: ["In: the saved tab audio and the speaker timeline", "the meeting's speaker indicator, which can lag or light the wrong tile"] };
+    const step = { x, y: 184, w, h: 316 }; // the whole correction, learning and re-checking together
+    const b = { x: x + 24, y: 230, w: w - 48, h: 128, kind: "key",
+                text: ["Learn each voice", "a voiceprint per speaker, from speech well inside their turns, where the timeline is reliable"] };
+    const c = { x: x + 180, y: 392, w: w - 360, h: 84, kind: "ask",
+                text: ["Re-check every stretch of speech, 1.5 s at a time", "a word moves only when its voice clearly belongs to someone else"] };
+    const d = { x, y: 532, w, h: 128, kind: "end", mono: [`${fixed[0]}  ← moved by voice`, fixed[1]],
+                text: ["Out: the corrected transcript", "cleanup and agents read it; the original stays the record"] };
+    return {
+      h: 684,
+      body:
+        rect("group", step.x, step.y, step.w, step.h, 16) + text("title", step.x + 18, step.y + 28, "Voice correction") +
+        [a, b, c, d].map(box).join("") +
+        arrow([at(a).bottom, at(b).top]) +
+        arrow([at(b).bottom, at(c).top]) +
+        arrow([at(c).bottom, at(d).top]),
+      alt: `Voice correction takes the saved tab audio and the speaker timeline, where the indicator switched to Grace at 1:52 while Ada was still talking ("${heard.join('", "')}"). It learns a voiceprint per speaker from speech well inside their turns, then re-checks every stretch of speech 1.5 seconds at a time, moving a word only when its voice clearly belongs to someone else; the mic is always the local user. The corrected transcript gives Ada the words up to 1:55 ("${fixed.join('", "')}"); cleanup and agents read it, and the original stays the record`,
+    };
+  },
+
   quality() {
     const raw = compared.find((s) => s.name === "Raw transcript").meetings.fwer;
     const panel = { title: "Errors in words, punctuation and capitals on meetings (lower is better)", value: (s) => s.meetings.fwer, fmt: pct,

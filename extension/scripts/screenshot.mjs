@@ -182,7 +182,7 @@ const diagram = `<!doctype html>
   </div>
   <div class="step">
     <div class="art server"><div class="snail"></div><div class="wave">${wave}</div></div>
-    <h2>scribe server</h2><p>on your own GPU</p>
+    <h2>scribe server</h2><p>on your own GPU; checks speakers by voice</p>
   </div>
   <div class="link"><div class="label">every meeting</div><div class="arrow right"></div></div>
   <div class="step">

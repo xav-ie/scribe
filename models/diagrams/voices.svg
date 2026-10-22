@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1062 684" width="1062" height="684" role="img"><style>
+  text { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; fill: #2b1c12; }
+  .bg { fill: #f6e6da; }
+  .box { fill: #fffaf6; stroke: #e2c6b0; stroke-width: 2; }
+  .key { fill: #d92d20; fill-opacity: .12; stroke: #d92d20; stroke-width: 2.5; }
+  .ask { fill: #fffaf6; stroke: #9c5a34; stroke-width: 2; stroke-dasharray: 7 5; }
+  .end { fill: #9c5a34; fill-opacity: .2; stroke: #9c5a34; stroke-width: 2; }
+  .frame { fill: #fffaf6; stroke: #e2c6b0; stroke-width: 1.5; }
+  .group { fill: none; stroke: #6f5240; stroke-width: 1.5; stroke-dasharray: 6 5; }
+  .title { font-size: 16px; font-weight: 650; }
+  .sub { font-size: 13.5px; fill: #6f5240; }
+  .label { font-size: 13px; font-weight: 550; fill: #9c5a34; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+  .edge { fill: none; stroke: #9c5a34; stroke-width: 2; marker-end: url(#arrow); }
+  .tag { fill: #f6e6da; }
+  .head { fill: #9c5a34; }
+  .ref { stroke: #6f5240; stroke-width: 1.5; stroke-dasharray: 4 4; }
+  .bar-ours { fill: #d92d20; }
+  .bar-baseline { fill: #6f5240; fill-opacity: .45; }
+  .bar-dictation { fill: #9c5a34; fill-opacity: .8; }
+</style><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="head" d="M0 0L10 5L0 10z"/></marker></defs><rect class="bg" width="1062" height="684"/><rect class="group" x="24" y="184" width="1014" height="316" rx="16"/><text class="title" x="42" y="212">Voice correction</text><rect class="box" x="24" y="24" width="1014" height="128" rx="14"/><text class="title" x="531" y="53.1" text-anchor="middle">In: the saved tab audio and the speaker timeline</text><text class="sub" x="531" y="72.2" text-anchor="middle">the meeting's speaker indicator, which can lag or light the wrong tile</text><rect class="frame" x="38" y="86" width="986" height="52" rx="8"/><text xml:space="preserve" class="mono" x="50" y="108">[1:48] Ada: so the default</text><text xml:space="preserve" class="mono" x="50" y="127">[1:52] Grace: sounds like seventy, unless you change it per product</text><rect class="key" x="48" y="230" width="966" height="128" rx="14"/><text class="title" x="531" y="290.1" text-anchor="middle">Learn each voice</text><text class="sub" x="531" y="309.2" text-anchor="middle">a voiceprint per speaker, from speech well inside their turns, where the timeline is reliable</text><rect class="ask" x="204" y="392" width="654" height="84" rx="14"/><text class="title" x="531" y="430.1" text-anchor="middle">Re-check every stretch of speech, 1.5 s at a time</text><text class="sub" x="531" y="449.2" text-anchor="middle">a word moves only when its voice clearly belongs to someone else</text><rect class="end" x="24" y="532" width="1014" height="128" rx="14"/><text class="title" x="531" y="561.1" text-anchor="middle">Out: the corrected transcript</text><text class="sub" x="531" y="580.2" text-anchor="middle">cleanup and agents read it; the original stays the record</text><rect class="frame" x="38" y="594" width="986" height="52" rx="8"/><text xml:space="preserve" class="mono" x="50" y="616">[1:48] Ada: so the default sounds like seventy,  ← moved by voice</text><text xml:space="preserve" class="mono" x="50" y="635">[1:55] Grace: unless you change it per product</text><path class="edge" d="M531 152L531 230"/><path class="edge" d="M531 358L531 392"/><path class="edge" d="M531 476L531 532"/></svg>
