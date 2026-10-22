@@ -822,9 +822,16 @@ def _boost_phrases(names):
 
 
 def _session_dir(session_id):
+    """A session's folder. The id becomes a directory name, so it must be a
+    UUID, and the resolved folder must sit inside RECORDINGS: the second check
+    can't fail after the first, but it's the form code scanning recognizes."""
     if not SESSION_ID_RE.fullmatch(session_id):
         raise HTTPException(404)
-    return RECORDINGS / session_id
+    root = os.path.realpath(RECORDINGS)
+    folder = os.path.realpath(os.path.join(root, session_id))
+    if not folder.startswith(root + os.sep):
+        raise HTTPException(404)
+    return Path(folder)
 
 
 def _channels(folder, with_words):
@@ -1943,7 +1950,7 @@ def _set_voice_job(session_id, **fields):
         job = _VOICE_JOBS.setdefault(session_id, {})
         job.update(fields)
         snapshot = {k: v for k, v in job.items() if k != "again"}
-    _write_json(RECORDINGS / session_id / "voicing.json", snapshot)
+    _write_json(_session_dir(session_id) / "voicing.json", snapshot)
     return snapshot
 
 
@@ -1995,7 +2002,7 @@ def _voices_worker(session_id):
 
 
 def _voice_session(session_id):
-    folder = RECORDINGS / session_id
+    folder = _session_dir(session_id)
     session = _read_session(folder, voiced=False)
     if not session:
         raise RuntimeError("no record for this session")
@@ -2033,7 +2040,7 @@ def _voice_session(session_id):
 def _after_voices(session_id):
     """Cleanup reads the corrected transcript, so it runs after: when it runs
     by itself, or to replace a cleaned copy the correction made stale."""
-    folder = RECORDINGS / session_id
+    folder = _session_dir(session_id)
     wanted = CLEANUP_AUTO or (folder / "cleaned.json").exists()
     if CLEANUP_URL and wanted and (_read_session(folder) or {}).get("segments"):
         _start_cleanup(session_id)
@@ -2045,7 +2052,7 @@ def _voicing(session_id):
         job = _VOICE_JOBS.get(session_id)
         if job is not None:
             return {k: v for k, v in job.items() if k != "again"}
-    job = _read_json(RECORDINGS / session_id / "voicing.json")
+    job = _read_json(_session_dir(session_id) / "voicing.json")
     if isinstance(job, dict) and job.get("status") in ("queued", "running"):
         job |= {"status": "failed", "error": "the server stopped before it finished"}
     return job if isinstance(job, dict) else None
