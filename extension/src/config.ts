@@ -10,14 +10,15 @@ export interface Settings {
   wsUrl: string;
   /** Log active-speaker detection + streaming diagnostics to the console. */
   debug: boolean;
-  /** Ask the streaming service to keep the audio it receives, per session. */
+  /** Ask the streaming service to keep the audio it receives, per session. On
+   * by default: replaying audio next to its transcript is half the web UI. */
   saveAudio: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   wsUrl: '',
   debug: false,
-  saveAudio: false,
+  saveAudio: true,
 };
 
 export async function getSettings(): Promise<Settings> {
