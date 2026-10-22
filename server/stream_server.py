@@ -49,6 +49,13 @@ Tunables (set by the Nix module via env):
   SCRIBE_CLEANUP_AUTO  clean each meeting when its recording ends (default
                       1 when SCRIBE_CLEANUP_URL is set; 0 cleans only on
                       request, from the web UI, the API or MCP)
+  SCRIBE_VOICES_DEVICE  where voice correction runs its speaker model
+                      (TitaNet): cpu (default, leaving the GPU to
+                      transcription), cuda or mps. Voice correction re-checks
+                      who spoke, near the timeline's speaker changes, against
+                      each speaker's voice in the saved tab audio; it runs when
+                      the extension asks for it, or on request, and writes
+                      voices.json, which the transcript then reads from
   SCRIBE_WYOMING      host:port for a Wyoming speech-to-text server (Home
                       Assistant's voice pipelines), e.g. 0.0.0.0:10300; unset
                       turns it off. Wyoming has no authentication, so bind it
@@ -211,6 +218,9 @@ CLEANUP_AUTO = os.environ.get("SCRIBE_CLEANUP_AUTO", "1").strip().lower() not in
     "no",
     "off",
 )
+# Voice correction (see "voice correction" below).
+VOICES_DEVICE = os.environ.get("SCRIBE_VOICES_DEVICE", "cpu").strip() or "cpu"
+VOICES_MODEL = "nvidia/speakerverification_en_titanet_large"
 
 torch.set_grad_enabled(False)
 
@@ -839,10 +849,12 @@ def _channels(folder, with_words):
     return out
 
 
-def _read_session(folder):
+def _read_session(folder, voiced=True):
     """The extension's record, with the fields scribe reads coerced to their
     expected shapes: anyone on the network can post one, and a malformed record
-    must not break the listing or the MCP tools."""
+    must not break the listing or the MCP tools. When voice correction has
+    run on this record, its segments stand in for the record's, which stay
+    as timelineSegments; voiced=False reads the record as posted."""
     session = _read_json(folder / "session.json")
     if not isinstance(session, dict):
         return None
@@ -862,6 +874,8 @@ def _read_session(folder):
         and isinstance(seg.get("text"), str)
         and _number(seg.get("start")) is not None
     ]
+    if voiced:
+        _apply_voices(folder, session)
     return session
 
 
@@ -983,6 +997,7 @@ def get_session(session_id: str, cleaned: bool = False):
         "channels": _channels(folder, with_words=True),
         "live": live,
         "cleaned": _cleaned_view(session_id, session, with_lines=cleaned),
+        "voicesRun": _voicing(session_id),
     }
 
 
@@ -1020,8 +1035,11 @@ async def put_session(session_id: str, request: Request):
         _write_json(folder / "session.json", record)
 
     await asyncio.to_thread(save)
-    # The extension posts its record when the recording ends.
-    if CLEANUP_URL and CLEANUP_AUTO and (_read_session(folder) or {}).get("segments"):
+    # The extension posts its record when the recording ends. Asked to correct
+    # speakers by voice, that runs first and cleanup follows it.
+    if record.get("voices") is True and _has_tab_audio(folder):
+        _start_voices(session_id)
+    elif CLEANUP_URL and CLEANUP_AUTO and (_read_session(folder) or {}).get("segments"):
         _start_cleanup(session_id)
     return {"ok": True}
 
@@ -1615,6 +1633,439 @@ def clean_session(session_id: str, request: Request):
     return _start_cleanup(session_id)
 
 
+# --- voice correction ---------------------------------------------------------
+#
+# The extension names speakers from the meeting's active-speaker indicator,
+# which lags and now and then lights the wrong tile. Voice correction checks
+# that against the voices in the saved tab audio: it learns each speaker's
+# voice (a TitaNet embedding) from speech well inside their turns, then
+# re-checks every run of speech, in 1.5 s windows, and moves a word to another
+# speaker only when the voice clearly says so (a looser bar near a speaker
+# change, where the indicator is often late, than well inside a turn). The mic
+# is left alone: it is always the local user. The result is voices.json, whose
+# segments _read_session serves in place of the record's while it matches the
+# record it was made from.
+
+LEAD_MS = 900  # the extension's speaker lead (extension/src/transcript.ts)
+MIC_NAME = "Me"  # who the extension attributes the mic to (background.ts)
+UNKNOWN = "Unknown"
+VOICE_PAUSE_S = 0.4  # a gap this long between words ends a run of speech
+VOICE_RUN_S = 3.0  # runs are cut at this length
+VOICE_MIN_S = 1.0  # shorter speech is too little to tell a voice by
+VOICE_MARGIN_MS = 1500  # "well inside a turn": no speaker change this close
+VOICE_WINDOW_S, VOICE_HOP_S = 1.5, 0.5
+VOICE_MIN_CHUNKS = 3  # runs a speaker needs before their voice is trusted
+VOICE_OUTLIER = 0.35  # a run this unlike its speaker's voice doesn't shape it
+# (similarity to the new speaker, its lead over the timeline's speaker) needed
+# to move a word: near a speaker change, and well inside a turn. Measured on
+# four meetings: every lopsided disagreement a listener checked went the
+# voice's way, and the timeline agreed with the voice on 98-100% of the runs
+# well inside turns.
+VOICE_NEAR = (0.5, 0.25)
+VOICE_INSIDE = (0.6, 0.35)
+
+
+def _tab_streams(session):
+    """The record's tab streams as [{words, epoch}], in either shape the
+    extension has posted: a list per capture, or one stream's words and clock."""
+    tab = session.get("tab")
+    if isinstance(tab, list):
+        streams = tab
+    elif _number(session.get("tabEpoch")) is not None:
+        streams = [{"words": session.get("tabWords"), "epoch": session["tabEpoch"]}]
+    else:
+        streams = []
+    return [
+        {"words": _words(st.get("words")), "epoch": st["epoch"]}
+        for st in streams
+        if isinstance(st, dict) and _number(st.get("epoch")) is not None
+    ]
+
+
+def _words(words):
+    return [
+        w
+        for w in words or []
+        if isinstance(w, dict)
+        and isinstance(w.get("word"), str)
+        and _number(w.get("start")) is not None
+        and _number(w.get("end")) is not None
+    ]
+
+
+def _speaker_at(timeline, at):
+    name = UNKNOWN
+    for span in timeline:
+        if span["from"] > at:
+            break
+        name = span["name"]
+    return name
+
+
+def _timeline(session):
+    return sorted(
+        (
+            s
+            for s in session.get("timeline") or []
+            if isinstance(s, dict)
+            and isinstance(s.get("name"), str)
+            and _number(s.get("from")) is not None
+        ),
+        key=lambda s: s["from"],
+    )
+
+
+def _merge_words(tab_words, mic):
+    """Segments the way the extension's mergeTranscript makes them: tab words
+    [(at, speaker, word)] and the mic's words, by wall clock, in speaker runs."""
+    stamped = list(tab_words)
+    for stream in mic if isinstance(mic, list) else []:
+        if not isinstance(stream, dict) or _number(stream.get("epoch")) is None:
+            continue
+        for w in _words(stream.get("words")):
+            at = stream["epoch"] + (w["start"] + w["end"]) / 2 * 1000
+            stamped.append((at, MIC_NAME, w["word"]))
+    stamped.sort(key=lambda x: x[0])
+    origin = stamped[0][0] if stamped else 0
+    segments = []
+    for at, speaker, word in stamped:
+        t = (at - origin) / 1000
+        last = segments[-1] if segments else None
+        if last and last["speaker"] == speaker:
+            last["text"] += f" {word}"
+            last["end"] = t
+        else:
+            segments.append(
+                {"speaker": speaker, "start": t, "end": t, "text": word, "at": at}
+            )
+    return segments
+
+
+def _speech_runs(words, epoch, timeline):
+    """Runs of words split at pauses and at VOICE_RUN_S, as (first, last,
+    inside): inside when no speaker change falls within VOICE_MARGIN_MS."""
+    runs, first = [], 0
+    for i in range(1, len(words) + 1):
+        if (
+            i == len(words)
+            or words[i]["start"] - words[i - 1]["end"] > VOICE_PAUSE_S
+            or words[i]["end"] - words[first]["start"] > VOICE_RUN_S
+        ):
+            lo = epoch + words[first]["start"] * 1000 + LEAD_MS - VOICE_MARGIN_MS
+            hi = epoch + words[i - 1]["end"] * 1000 + LEAD_MS + VOICE_MARGIN_MS
+            inside = not any(lo < span["from"] <= hi for span in timeline)
+            runs.append((first, i - 1, inside))
+            first = i
+    return runs
+
+
+def _clip(audio, start, end):
+    return audio[int(start * SAMPLE_RATE) : int(end * SAMPLE_RATE)]
+
+
+def _voices(streams, labels, timeline, embed):
+    """Each speaker's voice, from their runs well inside a turn."""
+    clips, names = [], []
+    for (st, audio), lab in zip(streams, labels, strict=True):
+        if audio is None:
+            continue
+        ws = st["words"]
+        for a, b, inside in _speech_runs(ws, st["epoch"], timeline):
+            name = lab[(a + b) // 2]
+            start, end = ws[a]["start"], ws[b]["end"]
+            if inside and name != UNKNOWN and end - start >= VOICE_MIN_S:
+                clips.append(_clip(audio, start, end))
+                names.append(name)
+    voices = {}
+    embs = np.asarray(embed(clips)) if clips else np.empty((0, 0))
+    for name in set(names):
+        mine = embs[[i for i, n in enumerate(names) if n == name]]
+        if len(mine) < VOICE_MIN_CHUNKS:
+            continue
+        v = mine.mean(0)
+        v /= np.linalg.norm(v)
+        # Once more without runs unlike the rest: a stretch the timeline got
+        # wrong would otherwise blur the voice it's filed under.
+        kept = mine[mine @ v >= VOICE_OUTLIER]
+        if len(kept) >= VOICE_MIN_CHUNKS:
+            v = kept.mean(0)
+            v /= np.linalg.norm(v)
+        voices[name] = v
+    return voices
+
+
+def _windows(start, end):
+    if end - start <= VOICE_WINDOW_S + VOICE_HOP_S:
+        return [(start, end)]
+    spans = [
+        (x, x + VOICE_WINDOW_S)
+        for x in np.arange(start, end - VOICE_WINDOW_S + 1e-6, VOICE_HOP_S)
+    ]
+    if spans[-1][1] < end:
+        spans.append((end - VOICE_WINDOW_S, end))
+    return spans
+
+
+def _correct_speakers(session, audio_for, embed):
+    """The tab's words with speakers corrected by voice.
+
+    audio_for(epoch) gives a tab stream's 16 kHz samples (None when not
+    saved); embed(clips) gives one unit vector per clip. Returns the words as
+    [(at, speaker, word)] and the changes as [(at, before, after, word)].
+    """
+    timeline = _timeline(session)
+    streams = [(st, audio_for(st["epoch"])) for st in _tab_streams(session)]
+    labels = [
+        [
+            _speaker_at(
+                timeline, st["epoch"] + (w["start"] + w["end"]) / 2 * 1000 + LEAD_MS
+            )
+            for w in st["words"]
+        ]
+        for st, _ in streams
+    ]
+    voices = _voices(streams, labels, timeline, embed)
+    names = list(voices)
+    matrix = np.stack([voices[n] for n in names]) if names else None
+    words, changes = [], []
+    for (st, audio), lab in zip(streams, labels, strict=True):
+        ws, final = st["words"], list(lab)
+        for a, b, inside in (
+            _speech_runs(ws, st["epoch"], timeline)
+            if matrix is not None and audio is not None
+            else ()
+        ):
+            start, end = ws[a]["start"], ws[b]["end"]
+            if end - start < VOICE_MIN_S:
+                continue
+            need_sim, need_gain = (
+                VOICE_INSIDE if inside and lab[(a + b) // 2] != UNKNOWN else VOICE_NEAR
+            )
+            spans = _windows(start, end)
+            sims = matrix @ np.asarray(embed([_clip(audio, x, y) for x, y in spans])).T
+            centers = np.array([(x + y) / 2 for x, y in spans])
+            for i in range(a, b + 1):
+                mid = (ws[i]["start"] + ws[i]["end"]) / 2
+                col = sims[:, int(np.abs(centers - mid).argmin())]
+                best = int(col.argmax())
+                was = lab[i]
+                was_sim = col[names.index(was)] if was in voices else -1.0
+                if (
+                    names[best] != was
+                    and col[best] >= need_sim
+                    and col[best] - was_sim >= need_gain
+                ):
+                    final[i] = names[best]
+        for w, before, after in zip(ws, lab, final, strict=True):
+            at = st["epoch"] + (w["start"] + w["end"]) / 2 * 1000
+            words.append((at, after, w["word"]))
+            if before != after:
+                changes.append((at, before, after, w["word"]))
+    return words, changes
+
+
+@functools.cache
+def _titanet():
+    model = nemo_asr.models.EncDecSpeakerLabelModel.from_pretrained(VOICES_MODEL)
+    return model.to(VOICES_DEVICE).eval()
+
+
+def _embed(clips):
+    """One unit-length voiceprint per clip of 16 kHz samples."""
+    model = _titanet()
+    out = []
+    # Grad mode is per thread, and this runs in the job's own thread, where the
+    # set_grad_enabled(False) made at import doesn't reach.
+    with torch.inference_mode():
+        for clip in clips:
+            signal = torch.tensor(np.asarray(clip, dtype=np.float32))[None]
+            signal = signal.to(VOICES_DEVICE)
+            length = torch.tensor([signal.shape[1]]).to(VOICES_DEVICE)
+            _, emb = model.forward(input_signal=signal, input_signal_length=length)
+            v = emb[0].float().cpu().numpy()
+            out.append(v / np.linalg.norm(v))
+    return out
+
+
+def _record_hash(session):
+    """Identifies the record a voice correction was made from."""
+    keep = {
+        k: session.get(k) for k in ("segments", "timeline", "tab", "tabWords", "mic")
+    }
+    return hashlib.sha256(json.dumps(keep, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _tab_audio(folder):
+    """Saved tab streams' samples by their clock (the epoch each records)."""
+    audio = {}
+    for meta_path in folder.glob("tab*.json"):
+        if not STEM_RE.fullmatch(meta_path.stem):
+            continue
+        meta = _read_json(meta_path) or {}
+        flac = meta_path.with_suffix(".flac")
+        if _number(meta.get("epoch")) is not None and flac.exists():
+            audio[meta["epoch"]] = sf.read(flac, dtype="float32")[0]
+    return audio
+
+
+def _has_tab_audio(folder):
+    return any(STEM_RE.fullmatch(p.stem) for p in folder.glob("tab*.flac"))
+
+
+def _apply_voices(folder, session):
+    voiced = _read_json(folder / "voices.json")
+    if not isinstance(voiced, dict) or voiced.get("source") != _record_hash(session):
+        return
+    segments = [
+        seg
+        for seg in voiced.get("segments") or []
+        if isinstance(seg, dict)
+        and isinstance(seg.get("speaker"), str)
+        and isinstance(seg.get("text"), str)
+        and _number(seg.get("start")) is not None
+    ]
+    session["timelineSegments"] = session["segments"]
+    session["segments"] = segments
+    session["voices"] = {
+        "changed": voiced.get("changed"),
+        "words": voiced.get("words"),
+        "finishedAt": voiced.get("finishedAt"),
+        "changes": voiced.get("changes") or [],
+    }
+
+
+_VOICE_JOBS = {}
+_voices_lock = threading.Lock()
+
+
+def _set_voice_job(session_id, **fields):
+    with _jobs_lock:
+        job = _VOICE_JOBS.setdefault(session_id, {})
+        job.update(fields)
+        snapshot = {k: v for k, v in job.items() if k != "again"}
+    _write_json(RECORDINGS / session_id / "voicing.json", snapshot)
+    return snapshot
+
+
+def _start_voices(session_id):
+    """Correct a session's speakers by voice in the background, unless a run
+    is already queued or running (then it runs once more after, for a newer
+    record). Cleanup follows it. Returns the run's status."""
+    with _jobs_lock:
+        job = _VOICE_JOBS.get(session_id)
+        if job and job["status"] in ("queued", "running"):
+            job["again"] = True
+            return {k: v for k, v in job.items() if k != "again"}
+        _VOICE_JOBS[session_id] = {}
+    status = _set_voice_job(
+        session_id,
+        status="queued",
+        error=None,
+        queuedAt=_now(),
+        startedAt=None,
+        finishedAt=None,
+    )
+    threading.Thread(target=_voices_worker, args=(session_id,), daemon=True).start()
+    return status
+
+
+def _voices_worker(session_id):
+    while True:
+        with _voices_lock:
+            try:
+                _voice_session(session_id)
+            except Exception as e:  # reported in the status; the record is untouched
+                logger.warning(
+                    "voice correction of %s failed", session_id, exc_info=True
+                )
+                _set_voice_job(
+                    session_id,
+                    status="failed",
+                    error=str(e) or type(e).__name__,
+                    finishedAt=_now(),
+                )
+        with _jobs_lock:
+            again = _VOICE_JOBS[session_id].pop("again", False)
+        if not again:
+            break
+        _set_voice_job(session_id, status="queued", error=None)
+    # A failed run changed nothing, so a cleaned copy is as good as before.
+    if (_voicing(session_id) or {}).get("status") == "done":
+        _after_voices(session_id)
+
+
+def _voice_session(session_id):
+    folder = RECORDINGS / session_id
+    session = _read_session(folder, voiced=False)
+    if not session:
+        raise RuntimeError("no record for this session")
+    audio = _tab_audio(folder)
+    if not audio:
+        raise RuntimeError("no saved tab audio")
+    started, t0 = _now(), time.monotonic()
+    _set_voice_job(session_id, status="running", startedAt=started)
+    words, changes = _correct_speakers(session, audio.get, _embed)
+    _write_json(
+        folder / "voices.json",
+        {
+            "model": VOICES_MODEL,
+            "source": _record_hash(session),
+            "startedAt": started,
+            "finishedAt": _now(),
+            "seconds": round(time.monotonic() - t0, 1),
+            "words": len(words),
+            "changed": len(changes),
+            "changes": [
+                {"at": at, "from": before, "to": after, "word": word}
+                for at, before, after, word in changes[:1000]
+            ],
+            "segments": _merge_words(words, session.get("mic")),
+        },
+    )
+    _set_voice_job(session_id, status="done", finishedAt=_now())
+    # The audio was kept only for this: drop it unless the user saves audio.
+    if session.get("saveAudio") is False:
+        for flac in folder.glob("*.flac"):
+            if STEM_RE.fullmatch(flac.stem):
+                flac.unlink(missing_ok=True)
+
+
+def _after_voices(session_id):
+    """Cleanup reads the corrected transcript, so it runs after: when it runs
+    by itself, or to replace a cleaned copy the correction made stale."""
+    folder = RECORDINGS / session_id
+    wanted = CLEANUP_AUTO or (folder / "cleaned.json").exists()
+    if CLEANUP_URL and wanted and (_read_session(folder) or {}).get("segments"):
+        _start_cleanup(session_id)
+
+
+def _voicing(session_id):
+    """The latest voice correction run's status, or None."""
+    with _jobs_lock:
+        job = _VOICE_JOBS.get(session_id)
+        if job is not None:
+            return {k: v for k, v in job.items() if k != "again"}
+    job = _read_json(RECORDINGS / session_id / "voicing.json")
+    if isinstance(job, dict) and job.get("status") in ("queued", "running"):
+        job |= {"status": "failed", "error": "the server stopped before it finished"}
+    return job if isinstance(job, dict) else None
+
+
+@app.post("/api/sessions/{session_id}/voices", status_code=202)
+def correct_session_speakers(session_id: str, request: Request):
+    """Correct (or correct again) a session's speakers by voice in the
+    background; the session's "voicesRun" reports progress."""
+    folder = _session_dir(session_id)
+    # A JSON content type can't be sent cross-site without a CORS preflight.
+    if request.headers.get("content-type", "").split(";")[0] != "application/json":
+        raise HTTPException(415)
+    if not _read_session(folder, voiced=False):
+        raise HTTPException(404, "no transcript for this session")
+    if not _has_tab_audio(folder):
+        raise HTTPException(409, "this session has no saved tab audio")
+    return _start_voices(session_id)
+
+
 # --- MCP ---------------------------------------------------------------------
 
 mcp = MCPServer(
@@ -1622,7 +2073,9 @@ mcp = MCPServer(
     instructions=(
         "Transcripts of meetings recorded by the meeting capture extension. "
         "Times are UTC. Speakers come from the meeting's active-speaker "
-        "indicator; 'Unknown' is speech it couldn't attribute. When the server "
+        "indicator; 'Unknown' is speech it couldn't attribute. A meeting with "
+        "saved audio can have them corrected by voice (correct_speakers); its "
+        "transcript then reads the corrected speakers. When the server "
         "runs the cleanup model, a meeting may also have a cleaned copy "
         "(get_transcript with cleaned=true); the original stays the record. "
         "That copy is separate from cleanups, which are notes an agent saved."
@@ -1765,6 +2218,22 @@ def get_transcript(session_id: str, cleaned: bool = False) -> str:
         for line in copy["lines"]
     ]
     return "\n".join([head, note, "", *lines])
+
+
+@mcp.tool()
+def correct_speakers(session_id: str) -> dict:
+    """Correct who spoke in a meeting by voice: each speaker's voice is
+    learned from the saved tab audio, and speech the voice clearly gives to
+    someone other than the active-speaker indicator moves to them. It runs in
+    the background; this returns the run's status. Afterwards get_transcript
+    and search read the corrected speakers (the cleaned copy is redone when
+    there is one). Only for meetings that saved their audio."""
+    folder = _meeting_dir(session_id)
+    if not _read_session(folder, voiced=False):
+        raise ToolError(f"no transcript for session {session_id}")
+    if not _has_tab_audio(folder):
+        raise ToolError(f"session {session_id} has no saved tab audio")
+    return _start_voices(session_id)
 
 
 @mcp.tool()

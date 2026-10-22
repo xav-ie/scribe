@@ -13,12 +13,17 @@ export interface Settings {
   /** Ask the streaming service to keep the audio it receives, per session. On
    * by default: replaying audio next to its transcript is half the web UI. */
   saveAudio: boolean;
+  /** Ask the streaming service to correct speakers by voice once the recording
+   * ends, which keeps the tab audio there until it's done (then drops it,
+   * unless saveAudio is on). */
+  voices: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   wsUrl: '',
   debug: false,
   saveAudio: true,
+  voices: false,
 };
 
 export async function getSettings(): Promise<Settings> {

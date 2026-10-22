@@ -259,6 +259,12 @@
         gap: 8px 12px;
         margin: 14px 0 0;
       }
+      .cleanup details {
+        flex-basis: 100%;
+      }
+      .cleanup details .change {
+        cursor: pointer;
+      }
       button.off {
         background: var(--surface);
         color: var(--text);
@@ -434,7 +440,7 @@
 
       async function show(id) {
         where.textContent = `/ ${id}`;
-        const { session, channels, live, cleaned } = await api(
+        const { session, channels, live, cleaned, voicesRun } = await api(
           `/api/sessions/${id}?cleaned=true`,
         );
         if (session?.title) where.textContent = `/ ${session.title}`;
@@ -670,6 +676,15 @@
           );
         }
         if (turns.length > 0) {
+          const voices = voicesBar(
+            id,
+            session,
+            channels,
+            voicesRun,
+            origin,
+            players.length > 0 ? seekAll : null,
+          );
+          if (voices) body.push(voices);
           const bar = cleanupBar(id, cleaned, cleanLines, showCleaned);
           if (bar) body.push(bar);
           body.push(el("h2", { textContent: "Transcript" }), ...turns);
@@ -776,6 +791,122 @@
         }
         bar.append(status);
         if (busy(cleaned.run)) follow();
+        return bar;
+      }
+
+      // Voice correction: what it changed, its latest run, and a button to run
+      // it (again) on a session with saved tab audio.
+      function voicesBar(id, session, channels, run, origin, seek) {
+        const voiced = session?.voices;
+        const audio = channels.some((c) => c.channel === "tab" && c.audio);
+        if (!voiced && !run && !audio) return null;
+        const bar = el("div", { className: "cleanup" });
+        const status = el("span", { className: "muted" });
+        const here = location.hash;
+        const busy = (r) => ["queued", "running"].includes(r?.status);
+        const describe = (r) => {
+          if (r?.status === "queued")
+            return "Voice correction is waiting its turn…";
+          if (r?.status === "running") return "Correcting speakers by voice…";
+          const failed =
+            r?.status === "failed"
+              ? `Voice correction failed: ${r.error}. `
+              : "";
+          if (!voiced) return failed;
+          return `${failed}Speakers corrected by voice: ${voiced.changed} of ${voiced.words} words moved.`;
+        };
+        status.textContent = describe(run);
+        const follow = async () => {
+          try {
+            for (;;) {
+              await sleep(2000);
+              if (location.hash !== here) return;
+              const { voicesRun: now } = await api(`/api/sessions/${id}`);
+              status.textContent = describe(now);
+              if (!busy(now)) return route();
+            }
+          } catch (e) {
+            status.textContent = String(e);
+          }
+        };
+        if (audio) {
+          const start = el("button", {
+            className: "off",
+            textContent: voiced
+              ? "Correct speakers again"
+              : "Correct speakers by voice",
+            hidden: busy(run),
+            onclick: async () => {
+              start.hidden = true;
+              const r = await fetch(`/api/sessions/${id}/voices`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: "{}",
+              });
+              if (!r.ok) {
+                start.hidden = false;
+                status.textContent = `Voice correction could not start (${r.status}).`;
+                return;
+              }
+              status.textContent = describe(await r.json());
+              follow();
+            },
+          });
+          bar.append(start);
+        }
+        bar.append(status);
+        // Runs of moved words, so each change reads as one stretch of speech.
+        const runs = [];
+        for (const c of voiced?.changes ?? []) {
+          const last = runs.at(-1);
+          if (
+            last &&
+            last.from === c.from &&
+            last.to === c.to &&
+            c.at - last.end < 2000
+          ) {
+            last.words.push(c.word);
+            last.end = c.at;
+          } else
+            runs.push({
+              from: c.from,
+              to: c.to,
+              at: c.at,
+              end: c.at,
+              words: [c.word],
+            });
+        }
+        if (runs.length > 0) {
+          bar.append(
+            el(
+              "details",
+              {},
+              el("summary", { textContent: `What changed (${runs.length})` }),
+              ...runs.map((r) =>
+                el("div", {
+                  textContent: `${clock((r.at - origin) / 1000)}  ${r.from} → ${r.to}: ${r.words.join(" ")}`,
+                  // Played from just before, to hear who it is.
+                  ...(seek
+                    ? {
+                        className: "change",
+                        tabIndex: 0,
+                        role: "button",
+                        title: "Play from here",
+                        onclick: () => seek(r.at - 1000),
+                        onkeydown: (event) => {
+                          if (event.key !== "Enter" && event.key !== " ")
+                            return;
+                          event.preventDefault();
+                          seek(r.at - 1000);
+                        },
+                      }
+                    : {}),
+                }),
+              ),
+            ),
+          );
+        }
+        if (busy(run)) follow();
         return bar;
       }
 

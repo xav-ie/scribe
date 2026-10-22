@@ -25,6 +25,7 @@ const statusEl = $<HTMLSpanElement>('status');
 const debugToggle = $<HTMLInputElement>('debug');
 const saveAudioToggle = $<HTMLInputElement>('saveAudio');
 const saveAudioNote = $<HTMLElement>('saveAudioNote');
+const voicesToggle = $<HTMLInputElement>('voices');
 const exportBtn = $<HTMLButtonElement>('exportDebug');
 const micSetupLink = $<HTMLAnchorElement>('micSetup');
 const errorEl = $<HTMLElement>('error');
@@ -45,6 +46,7 @@ function render(state: RecState): void {
   // The streaming service is told whether to save audio when a stream opens,
   // so a change only applies from the next recording.
   saveAudioToggle.disabled = state.status !== 'idle';
+  voicesToggle.disabled = state.status !== 'idle';
   saveAudioNote.classList.toggle('hidden', state.status === 'idle');
 
   if (state.error) {
@@ -88,6 +90,7 @@ async function init(): Promise<void> {
   const settings = await getSettings();
   debugToggle.checked = settings.debug;
   saveAudioToggle.checked = settings.saveAudio;
+  voicesToggle.checked = settings.voices;
   $<HTMLElement>('build').textContent = BUILD;
 
   render(await getState());
@@ -115,6 +118,10 @@ debugToggle.addEventListener(
 saveAudioToggle.addEventListener(
   'change',
   () => void setSettings({ saveAudio: saveAudioToggle.checked }),
+);
+voicesToggle.addEventListener(
+  'change',
+  () => void setSettings({ voices: voicesToggle.checked }),
 );
 $<HTMLAnchorElement>('openOptions').addEventListener('click', (event) => {
   event.preventDefault();
