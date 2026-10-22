@@ -7,7 +7,8 @@
 //   assets/logo/mark.svg                      the snail alone, cropped to its bounds
 //   extension/public/icons/icon*.png          the shell, enlarged for the toolbar
 //   the marked blocks in extension/src/popup.css and server/ui.html: the palette
-//   as CSS variables, and the web UI's favicon and header mark
+//   as CSS variables, the web UI's favicon (the toolbar icon's shell) and its
+//   header mark
 // Run in `nix develop` (node, and ImageMagick with librsvg for the PNGs):
 //   node scripts/assets.mjs
 // CI runs it and fails if anything it writes differs from what's committed.
@@ -98,19 +99,18 @@ const shellCenter = [
   (shellBounds[1] + shellBounds[3]) / 2,
 ];
 const SHELL_SCALE = 2.6;
+const shellIcon = (stroke) =>
+  svg(
+    "0 0 512 512",
+    `<g transform="translate(256,256) scale(${SHELL_SCALE}) translate(${-shellCenter[0]},${-shellCenter[1]})">` +
+      `<path d="${shell[1]}" fill="none" stroke="${palette.dark.rec}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"/></g>`,
+  );
 // Thicker strokes (logo units, before scaling) at small sizes, so it stays legible.
 const ICON_STROKES = { 16: 14, 32: 12, 48: 12, 128: 10 };
 const work = mkdtempSync(path.join(tmpdir(), "scribe-assets-"));
 for (const [size, stroke] of Object.entries(ICON_STROKES)) {
   const file = path.join(work, `icon${size}.svg`);
-  writeFileSync(
-    file,
-    svg(
-      "0 0 512 512",
-      `<g transform="translate(256,256) scale(${SHELL_SCALE}) translate(${-shellCenter[0]},${-shellCenter[1]})">` +
-        `<path d="${shell[1]}" fill="none" stroke="${palette.dark.rec}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"/></g>`,
-    ),
-  );
+  writeFileSync(file, shellIcon(stroke));
   execFileSync("magick", [
     "-background",
     "none",
@@ -155,7 +155,8 @@ fill(
   "/* palette:end */",
   cssVars("        "),
 );
-const favicon = `data:image/svg+xml,${encodeURIComponent(logo(palette.dark).trim())}`;
+// The favicon is the toolbar icon: the shell alone, stroked for a tab's 16 px.
+const favicon = `data:image/svg+xml,${encodeURIComponent(shellIcon(ICON_STROKES[16]).trim())}`;
 fill(
   "server/ui.html",
   "<!-- favicon:start -->",
