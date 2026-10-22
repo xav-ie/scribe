@@ -1,3 +1,17 @@
+## 0.1.6 (2026-10-22)
+
+### Features
+
+#### Speakers corrected by voice
+
+A new popup option, "Correct speakers by voice", has the server re-check who spoke once the meeting ends: it learns each speaker's voice from the saved audio and moves speech the voice clearly gives to someone else, fixing the moments the meeting's speaker indicator lags or lights the wrong tile. The audio is kept only until that's done unless "Save audio" is on, and cleanup then runs on the corrected transcript. Any session with saved audio can be corrected from the web UI (which lists what changed, each playable) or the `correct_speakers` MCP tool.
+
+### Fixes
+
+#### Web UI favicon is the swirl
+
+The web UI's tab icon is now the snail's shell alone, like the extension's toolbar icon, instead of the whole snail on its circle.
+
 ## 0.1.5 (2026-10-22)
 
 ### Features
