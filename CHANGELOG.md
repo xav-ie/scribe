@@ -1,3 +1,53 @@
+## 0.1.5 (2026-10-22)
+
+### Features
+
+#### Sessions carry the meeting's name
+
+Each session records the meeting's name from its tab title (Meet's calendar event name, for instance). The web UI lists it with each session and heads the session page with it, and the MCP tools return it, ahead of the name the cleanup model makes up.
+
+### Fixes
+
+#### No blank sessions, no lost last words
+
+A recording that failed to start no longer leaves a blank session on the server. Stopping a long recording after Chrome had put the extension's worker to sleep no longer drops its last few words.
+
+#### Debug bundles leave out the access token
+
+A downloaded debug bundle no longer contains the server's access token, which would let anyone you share it with read every meeting. It shows `#token=redacted` instead, so you can still tell one was set.
+
+#### Tab and mic audio play together
+
+On a saved session, the tab and microphone players are linked: playing, pausing or scrubbing one does the same to the other, on the meeting's clock. A "Tracks linked" button unlinks them to play one alone.
+
+#### Resumed sessions in the live view
+
+While a resumed session records, the web UI's live view shows the earlier part's transcript above the live words, and once it stops waits for the combined record instead of showing the earlier part alone.
+
+#### First words after unmuting are kept
+
+The extension notices you unmuting within a tenth of a second instead of up to half a second, so the start of what you say right after unmuting is no longer cut off.
+
+#### The toolbar icon shows when it's recording
+
+The extension's icon shows a red REC badge while recording, and a yellow ! when the last recording ended in an error (such as the server dropping), with the error in its tooltip, until the next recording starts.
+
+#### Meeting audio is saved by default
+
+"Save audio on the streaming service" now starts checked, so a new install keeps each meeting's audio for replay next to its transcript. A choice you already made is kept.
+
+#### Settings page matches the popup
+
+The settings page no longer points to a "Capture my microphone" checkbox in the popup, which was removed when the mic became always recorded.
+
+#### A recording the server ends says why
+
+When the streaming service ends a recording you didn't stop, the popup now says so (with the server's reason) and the toolbar icon shows !, instead of quietly going idle. A server falling behind no longer looks like a missing access token.
+
+#### Closing the meeting tab stops the recording
+
+Closing the meeting tab now ends the recording, instead of leaving it running and still transcribing your microphone. The popup also warns when your microphone can't be opened or its stream drops, rather than quietly leaving your voice out.
+
 ## 0.1.4 (2026-10-21)
 
 ### Features
