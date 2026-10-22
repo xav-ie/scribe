@@ -2029,12 +2029,13 @@ def _voice_session(session_id):
             "segments": _merge_words(words, session.get("mic")),
         },
     )
-    _set_voice_job(session_id, status="done", finishedAt=_now())
-    # The audio was kept only for this: drop it unless the user saves audio.
+    # The audio was kept only for this: drop it unless the user saves audio,
+    # before the run reads as done.
     if session.get("saveAudio") is False:
         for flac in folder.glob("*.flac"):
             if STEM_RE.fullmatch(flac.stem):
                 flac.unlink(missing_ok=True)
+    _set_voice_job(session_id, status="done", finishedAt=_now())
 
 
 def _after_voices(session_id):
