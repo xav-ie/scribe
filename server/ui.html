@@ -202,6 +202,11 @@
         align-items: center;
         gap: 10px;
       }
+      .players .link-tracks {
+        justify-self: end;
+        padding: 3px 10px;
+        font-size: 12px;
+      }
       .players label span {
         width: 70px;
         color: var(--muted);
@@ -254,7 +259,7 @@
         gap: 8px 12px;
         margin: 14px 0 0;
       }
-      .cleanup button.off {
+      button.off {
         background: var(--surface);
         color: var(--text);
         border: 1px solid var(--line);
@@ -476,6 +481,64 @@
           }
         };
 
+        // Linked, the players move as one on the meeting's clock: playing,
+        // pausing or scrubbing one does the same to the others, and a stream
+        // that starts later (the mic, or a resumed part) joins when playback
+        // reaches it. The player that moved steers: for a moment after, the
+        // others' events are echoes of being steered and are ignored, or a
+        // stale one (a pause landing after a quick scrub) would drag it back.
+        let linked = true;
+        let steering = { by: null, until: 0 };
+        const timed = players.filter((p) => p.epoch != null);
+        const follow = (src, steer = true) => {
+          if (steer) steering = { by: src, until: performance.now() + 500 };
+          const at = src.epoch + src.audio.currentTime * 1000;
+          for (const p of timed) {
+            if (p === src) continue;
+            const t = (at - p.epoch) / 1000;
+            if (t < 0 || (p.audio.duration && t > p.audio.duration)) {
+              if (!p.audio.paused) p.audio.pause();
+              continue;
+            }
+            if (Math.abs(p.audio.currentTime - t) > 0.3)
+              p.audio.currentTime = t;
+            if (src.audio.paused && !p.audio.paused) p.audio.pause();
+            if (!src.audio.paused && p.audio.paused)
+              p.audio.play().catch(() => {});
+          }
+        };
+        for (const p of timed) {
+          const sync = () => {
+            const echo =
+              steering.by !== p && performance.now() < steering.until;
+            if (linked && !echo) follow(p);
+          };
+          p.audio.addEventListener("play", sync);
+          p.audio.addEventListener("seeked", sync);
+          // A track reaching its end mustn't stop the ones still going.
+          p.audio.addEventListener("pause", () => p.audio.ended || sync());
+          // Playing along also lets a later stream join, without steering.
+          p.audio.addEventListener(
+            "timeupdate",
+            () => linked && !p.audio.paused && follow(p, false),
+          );
+        }
+        const linkButton = el("button", {
+          className: "link-tracks",
+          textContent: "Tracks linked",
+          ariaPressed: "true",
+          onclick: () => {
+            linked = !linked;
+            linkButton.textContent = linked
+              ? "Tracks linked"
+              : "Tracks unlinked";
+            linkButton.ariaPressed = String(linked);
+            linkButton.classList.toggle("off", !linked);
+            const playing = timed.find((p) => !p.audio.paused);
+            if (linked && (playing ?? timed[0])) follow(playing ?? timed[0]);
+          },
+        });
+
         // The cleanup model's copy, line for line with the segments, when
         // there is one. The original stays the record and the default view.
         const copy = cleaned?.copy;
@@ -602,6 +665,7 @@
               ...players.map((p) =>
                 el("label", {}, el("span", { textContent: p.stem }), p.audio),
               ),
+              ...(timed.length > 1 ? [linkButton] : []),
             ),
           );
         }
