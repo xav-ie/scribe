@@ -10,6 +10,7 @@ TOOLS = {
     "list_meetings",
     "get_transcript",
     "clean_transcript",
+    "correct_speakers",
     "search_transcripts",
     "create_cleanup",
     "finish_cleanup",

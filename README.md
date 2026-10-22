@@ -25,6 +25,10 @@ turn it into clean, readable text without changing what anyone said.
   capitals, keeping every other word, speaker, timestamp and number. It runs on
   your own computer, and it beats every other small open cleanup model we
   measured. Optional; the original transcript always stays the record.
+- **Speakers checked by voice.** Optionally, once a meeting ends, each
+  speaker's voice is learned from the saved audio and speech the voice clearly
+  gives to someone else moves to them, fixing the moments the meeting's
+  speaker indicator lags or lights the wrong tile.
 - **Every meeting kept.** Replay audio next to its transcript, or follow a
   recording live, in the server's web UI.
 - **Ready for agents.** An MCP server lets AI agents list, read and search
@@ -38,11 +42,11 @@ turn it into clean, readable text without changing what anyone said.
 
 ## What you need
 
-| Part | Runs on |
-|---|---|
-| The browser extension | Chrome or another Chromium browser on your computer, including a Mac, with Google Meet or Zoom open in the browser |
-| The scribe server (speech-to-text) | a Mac with Apple silicon ([natively](#on-a-mac)), or a Linux machine with an NVIDIA GPU (in a container). It doesn't have to be the computer you take calls on: one server on your network can serve every laptop (see [Configuration](#configuration)) |
-| The optional [cleanup model](models/README.md) | an NVIDIA GPU, or a Mac with an Apple chip |
+| Part                                           | Runs on                                                                                                                                                                                                                                                 |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The browser extension                          | Chrome or another Chromium browser on your computer, including a Mac, with Google Meet or Zoom open in the browser                                                                                                                                      |
+| The scribe server (speech-to-text)             | a Mac with Apple silicon ([natively](#on-a-mac)), or a Linux machine with an NVIDIA GPU (in a container). It doesn't have to be the computer you take calls on: one server on your network can serve every laptop (see [Configuration](#configuration)) |
+| The optional [cleanup model](models/README.md) | an NVIDIA GPU, or a Mac with an Apple chip                                                                                                                                                                                                              |
 
 English only, for now.
 
@@ -213,15 +217,15 @@ The image takes the cleanup model's prompt and safety check from
 <details>
 <summary><b>Server reference</b>: routes, streaming protocol, configuration</summary>
 
-| Route                                     |                                                                                                                                                                |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /`                                   | Web UI: saved sessions with audio playback, live view of a recording in progress, the vocabulary editor.                                                       |
-| `WS /ws`                                  | Streaming recognition (protocol below).                                                                                                                        |
-| `WS /ws/watch/<sessionId>`                | Follow a session's streams live, as the web UI does.                                                                                                           |
-| `POST /v1/audio/transcriptions`           | OpenAI-style batch transcription of an uploaded clip; replies `{"text"}`.                                                                                      |
-| `/api/sessions`, `/api/vocab`             | The JSON API behind the web UI. `GET /api/sessions/<id>?cleaned=true` adds the cleaned copy; `POST /api/sessions/<id>/clean` makes one.                         |
-| `/mcp`                                    | MCP server (streamable HTTP): `list_meetings`, `get_transcript` (`cleaned=true` for the cleaned copy), `search_transcripts`, `clean_transcript`, cleanups (notes an agent made from a transcript), and vocabulary tools. |
-| `/api/info`, `/api/login`, `/api/pairing` | Whether a token is required, the web UI's login, and the extension's pairing URL.                                                                              |
+| Route                                     |                                                                                                                                                                                                                                              |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /`                                   | Web UI: saved sessions with audio playback, live view of a recording in progress, the vocabulary editor.                                                                                                                                     |
+| `WS /ws`                                  | Streaming recognition (protocol below).                                                                                                                                                                                                      |
+| `WS /ws/watch/<sessionId>`                | Follow a session's streams live, as the web UI does.                                                                                                                                                                                         |
+| `POST /v1/audio/transcriptions`           | OpenAI-style batch transcription of an uploaded clip; replies `{"text"}`.                                                                                                                                                                    |
+| `/api/sessions`, `/api/vocab`             | The JSON API behind the web UI. `GET /api/sessions/<id>?cleaned=true` adds the cleaned copy; `POST /api/sessions/<id>/clean` makes one; `POST /api/sessions/<id>/voices` corrects its speakers by voice.                                     |
+| `/mcp`                                    | MCP server (streamable HTTP): `list_meetings`, `get_transcript` (`cleaned=true` for the cleaned copy), `search_transcripts`, `clean_transcript`, `correct_speakers`, cleanups (notes an agent made from a transcript), and vocabulary tools. |
+| `/api/info`, `/api/login`, `/api/pairing` | Whether a token is required, the web UI's login, and the extension's pairing URL.                                                                                                                                                            |
 
 With a token set, every route except `/`, `/health`, `/api/info` and the login
 takes `Authorization: Bearer <token>` (or the web UI's login cookie), and `/ws`
@@ -334,6 +338,7 @@ you](#optional-cleanup) when you point it at one. See [models/](models/README.md
 and how it compares with other models.
 
 <!-- table:comparison-verdict -->
+
 In short: scribe cleanup makes the fewest errors and drops 0.5% of real words; the dictation models drop 4.5% to 15.5%, and lose a "not" in 1.8% to 29.1% of meeting chunks.
 <!-- /table:comparison-verdict -->
 

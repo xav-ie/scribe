@@ -60,6 +60,10 @@ interface JoinSession {
   title: string | null;
   /** The captured tab; only its content script's diagnostics are kept. */
   tabId: number | null;
+  /** The settings it records under, which the streaming service acts on once
+   * the record arrives: correct speakers by voice, then keep the audio or not. */
+  saveAudio: boolean;
+  voices: boolean;
   /** Meeting client, from the captured tab's host (meet, zoom, or the host). */
   platform: string | null;
   timeline: SpeakerSpan[];
@@ -83,6 +87,8 @@ function emptySession(): JoinSession {
     url: null,
     title: null,
     tabId: null,
+    saveAudio: false,
+    voices: false,
     platform: null,
     timeline: [],
     tab: [],
@@ -232,6 +238,8 @@ async function startRecording(): Promise<void> {
       url,
       title: meetingTitle(tab.title) ?? previous.title,
       tabId: tab.id,
+      saveAudio: settings.saveAudio,
+      voices: settings.voices,
     };
     dlog('[bg] resuming session', previous.sessionId);
     await recompute(mem);
@@ -246,6 +254,8 @@ async function startRecording(): Promise<void> {
       title: meetingTitle(tab.title),
       tabId: tab.id,
       platform: platformOf(tab.url),
+      saveAudio: settings.saveAudio,
+      voices: settings.voices,
     };
   }
   resyncRequested = false;
@@ -285,7 +295,9 @@ async function startRecording(): Promise<void> {
       debug: settings.debug,
       sessionId,
       captureId,
-      saveAudio: settings.saveAudio,
+      // Voice correction reads the saved audio; the server drops it after
+      // unless saveAudio is on.
+      saveAudio: settings.saveAudio || settings.voices,
       boost,
       tabId: tab.id,
       timeline: mem?.timeline ?? [],
