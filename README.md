@@ -131,7 +131,7 @@ Every meeting is saved on the server. Open `http://localhost:8000` to browse
 them: click any line to replay the audio from there, or follow a recording live
 while it happens.
 
-![The web UI showing a saved meeting: speaker chips, audio players for the tab and microphone, and the transcript with the line being played highlighted](assets/web-ui.png)
+![The web UI showing a saved meeting: speaker chips, one audio transport with a lane for the meeting and your own mic, and the transcript with the line being played highlighted](assets/web-ui.png)
 
 Your AI agents can read them too. Add the server's MCP endpoint to Claude Code:
 

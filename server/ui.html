@@ -192,22 +192,149 @@
         top: 0;
         z-index: 1;
         display: grid;
-        gap: 6px;
+        gap: 8px;
         padding: 10px 0;
         background: var(--bg);
         border-bottom: 1px solid var(--line);
       }
-      .players label {
+      /* One transport over every stream: play, the meeting's clock, and a
+         scrubber with a lane per stream kind showing where its audio runs. */
+      .player {
         display: flex;
         align-items: center;
         gap: 10px;
       }
-      .players .link-tracks {
-        justify-self: end;
-        padding: 3px 10px;
-        font-size: 12px;
+      .player .play {
+        flex: none;
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
-      .players label span {
+      .player .play svg {
+        display: block;
+        width: 14px;
+        height: 14px;
+        fill: white;
+      }
+      .player .play .pause {
+        display: none;
+      }
+      .player .play.going .pause {
+        display: block;
+      }
+      .player .play.going .go {
+        display: none;
+      }
+      .player .time {
+        flex: none;
+        min-width: 5ch;
+        font: 12px var(--mono);
+        font-variant-numeric: tabular-nums;
+        color: var(--muted);
+      }
+      .scrub {
+        position: relative;
+        flex: 1;
+        height: 26px;
+      }
+      .scrub .lanes {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        right: 0;
+        transform: translateY(-50%);
+        display: grid;
+        gap: 2px;
+        pointer-events: none;
+      }
+      .scrub .lanes .lane {
+        position: relative;
+        height: 3px;
+        border-radius: 2px;
+      }
+      .scrub .lanes .lane.off {
+        opacity: 0.25;
+      }
+      .scrub .lanes .lane i {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        border-radius: 2px;
+        background: currentColor;
+      }
+      .scrub input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        margin: 0;
+        appearance: none;
+        -webkit-appearance: none;
+        background: transparent;
+        cursor: pointer;
+      }
+      .scrub input::-webkit-slider-runnable-track {
+        height: 26px;
+        background: transparent;
+      }
+      .scrub input::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 11px;
+        height: 11px;
+        margin-top: 7.5px;
+        border-radius: 50%;
+        background: var(--text);
+      }
+      .scrub input::-moz-range-track {
+        height: 26px;
+        background: transparent;
+      }
+      .scrub input::-moz-range-thumb {
+        width: 11px;
+        height: 11px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--text);
+      }
+      .scrub input:focus-visible {
+        outline: 2px solid var(--link);
+        border-radius: 6px;
+      }
+      /* Which streams are heard: a switch per kind, its dot the lane's color. */
+      .pick {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px 18px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .pick label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+      }
+      .pick .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+      }
+      /* A stream that predates recorded epochs can't sit on the meeting's
+         clock; it keeps a native player of its own. */
+      .players .solo {
+        display: grid;
+        gap: 6px;
+      }
+      .players .solo label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .players .solo label span {
         width: 70px;
         color: var(--muted);
         font-size: 12px;
@@ -464,86 +591,39 @@
               (c.channel === "tab"
                 ? session?.tabEpoch
                 : micEpochs[stemOrder(c.stem) - 1]);
+            // A stream with no start at all can't sit on the meeting's clock;
+            // it keeps a native player of its own, below.
             const audio = el("audio", {
-              controls: true,
               preload: "metadata",
+              controls: epoch == null,
               src: `/api/sessions/${id}/audio/${c.stem}`,
             });
-            return { stem: c.stem, epoch, audio };
+            return { stem: c.stem, group: c.channel, epoch, audio };
           });
+        const timed = players.filter((p) => p.epoch != null);
+        // Set below when there is audio to run; turns seek through it.
+        let playFrom = null;
+        // Leaving the page stops whatever is sounding; the transport below
+        // replaces this with its own stopper when there is one.
+        stopPage = () => {
+          for (const p of players) p.audio.pause();
+        };
 
         const segments = session?.segments ?? [];
         const origin = session?.startedAt ?? segments[0]?.at ?? 0;
-        const seekAll = (at) => {
-          for (const p of players) {
-            if (p.epoch == null) continue;
-            const t = (at - p.epoch) / 1000;
-            if (t >= 0 && (!p.audio.duration || t <= p.audio.duration)) {
-              p.audio.currentTime = t;
-              p.audio.play();
-            } else {
-              p.audio.pause();
-            }
-          }
-        };
-
-        // Linked, the players move as one on the meeting's clock: playing,
-        // pausing or scrubbing one does the same to the others, and a stream
-        // that starts later (the mic, or a resumed part) joins when playback
-        // reaches it. The player that moved steers: for a moment after, the
-        // others' events are echoes of being steered and are ignored, or a
-        // stale one (a pause landing after a quick scrub) would drag it back.
-        let linked = true;
-        let steering = { by: null, until: 0 };
-        const timed = players.filter((p) => p.epoch != null);
-        const follow = (src, steer = true) => {
-          if (steer) steering = { by: src, until: performance.now() + 500 };
-          const at = src.epoch + src.audio.currentTime * 1000;
-          for (const p of timed) {
-            if (p === src) continue;
-            const t = (at - p.epoch) / 1000;
-            if (t < 0 || (p.audio.duration && t > p.audio.duration)) {
-              if (!p.audio.paused) p.audio.pause();
-              continue;
-            }
-            if (Math.abs(p.audio.currentTime - t) > 0.3)
-              p.audio.currentTime = t;
-            if (src.audio.paused && !p.audio.paused) p.audio.pause();
-            if (!src.audio.paused && p.audio.paused)
-              p.audio.play().catch(() => {});
-          }
-        };
-        for (const p of timed) {
-          const sync = () => {
-            const echo =
-              steering.by !== p && performance.now() < steering.until;
-            if (linked && !echo) follow(p);
-          };
-          p.audio.addEventListener("play", sync);
-          p.audio.addEventListener("seeked", sync);
-          // A track reaching its end mustn't stop the ones still going.
-          p.audio.addEventListener("pause", () => p.audio.ended || sync());
-          // Playing along also lets a later stream join, without steering.
-          p.audio.addEventListener(
-            "timeupdate",
-            () => linked && !p.audio.paused && follow(p, false),
+        // The transport's clock, like the transcript's, starts at the record's
+        // first moment, so the numbers beside the turns match.
+        const base =
+          origin > 0
+            ? origin
+            : timed.length > 0
+              ? Math.min(...timed.map((p) => p.epoch))
+              : 0;
+        const endAt = () =>
+          Math.max(
+            base,
+            ...timed.map((p) => p.epoch + (p.audio.duration || 0) * 1000),
           );
-        }
-        const linkButton = el("button", {
-          className: "link-tracks",
-          textContent: "Tracks linked",
-          ariaPressed: "true",
-          onclick: () => {
-            linked = !linked;
-            linkButton.textContent = linked
-              ? "Tracks linked"
-              : "Tracks unlinked";
-            linkButton.ariaPressed = String(linked);
-            linkButton.classList.toggle("off", !linked);
-            const playing = timed.find((p) => !p.audio.paused);
-            if (linked && (playing ?? timed[0])) follow(playing ?? timed[0]);
-          },
-        });
 
         // The cleanup model's copy, line for line with the segments, when
         // there is one. The original stays the record and the default view.
@@ -553,14 +633,17 @@
         const texts = segments.map((seg) =>
           el("div", { textContent: seg.text }),
         );
+        // Turns seek through the transport when there is one; `playFrom` is
+        // only set below, so this says now what it will say then.
+        const playable = timed.length > 0;
         const turns = segments.map((seg, i) =>
           el(
             "div",
             {
               className: "turn",
-              onclick: () => seg.at != null && seekAll(seg.at),
+              onclick: () => seg.at != null && playFrom?.(seg.at),
               // Playable from the keyboard as well when there's audio to seek.
-              ...(seg.at != null && players.length > 0
+              ...(seg.at != null && playable
                 ? {
                     tabIndex: 0,
                     role: "button",
@@ -568,7 +651,7 @@
                     onkeydown: (event) => {
                       if (event.key !== "Enter" && event.key !== " ") return;
                       event.preventDefault();
-                      seekAll(seg.at);
+                      playFrom(seg.at);
                     },
                   }
                 : {}),
@@ -591,6 +674,234 @@
             ),
           ),
         );
+        // One transport over every stream. All the audio plays on the meeting's
+        // clock, each stream within the window its recorded epoch gives it: a
+        // stream that starts later (the mic, a resumed part) is cued until
+        // playback reaches it, and one that has ended doesn't stop the rest.
+        // A switch per stream kind says which are heard; both are, by default.
+        let transport = null;
+        let pick = null;
+        if (timed.length > 0) {
+          // The meeting's now, in wall-clock ms.
+          let at = base;
+          let playing = false;
+          let scrubbing = false;
+          let raf = 0;
+          let last = 0;
+
+          const play = el("button", {
+            className: "play",
+            ariaLabel: "Play",
+            onclick: () => {
+              playing = !playing;
+              // Play at the end starts over, the way a player should.
+              if (playing && at >= endAt() - 250) at = base;
+              if (playing) start();
+              // apply() right away: the first tick would otherwise see the
+              // streams still parked at the end and call the meeting over.
+              apply();
+              paint();
+            },
+          });
+          play.append(
+            el("span", {
+              className: "go",
+              innerHTML:
+                '<svg viewBox="0 0 24 24"><path d="M7.5 4.5v15l13-7.5z"/></svg>',
+            }),
+            el("span", {
+              className: "pause",
+              innerHTML:
+                '<svg viewBox="0 0 24 24"><path d="M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z"/></svg>',
+            }),
+          );
+          const nowEl = el("span", { className: "time", textContent: "0:00" });
+          const totalEl = el("span", { className: "time" });
+          const range = el("input", {
+            type: "range",
+            min: 0,
+            max: 1,
+            step: 1,
+            value: 0,
+            ariaLabel: "Seek",
+          });
+          // Scrubbing previews on the clock alone; on release the streams are
+          // put where the clock says.
+          range.addEventListener("input", () => {
+            scrubbing = true;
+            at = base + range.value * 1000;
+            nowEl.textContent = clock((at - base) / 1000);
+          });
+          range.addEventListener("change", () => {
+            scrubbing = false;
+            apply();
+            paint();
+          });
+
+          const lanes = el("div", { className: "lanes" });
+          const laneBits = [];
+          pick = el("div", { className: "pick" });
+          const KINDS = [
+            { key: "tab", label: "Meeting audio", color: "var(--border)" },
+            { key: "mic", label: "Your audio", color: "var(--ok)" },
+          ];
+          for (const kind of KINDS) {
+            const tracks = timed.filter((p) => p.group === kind.key);
+            if (tracks.length === 0) continue;
+            const lane = el("div", {
+              className: "lane",
+              style: `color:${kind.color}`,
+            });
+            const bits = tracks.map((p) => {
+              const bit = el("i");
+              lane.append(bit);
+              return { bit, p };
+            });
+            lanes.append(lane);
+            laneBits.push(bits);
+            const box = el("input", { type: "checkbox", checked: true });
+            // A switched-off stream keeps its place on the clock, unheard.
+            box.addEventListener("change", () => {
+              for (const p of tracks) p.audio.muted = !box.checked;
+              lane.classList.toggle("off", !box.checked);
+            });
+            pick.append(
+              el(
+                "label",
+                {},
+                box,
+                el("span", {
+                  className: "dot",
+                  style: `background:${kind.color}`,
+                }),
+                el("span", {
+                  textContent: kind.label,
+                  title: `${kind.label}: ${tracks.map((p) => p.stem).join(", ")}`,
+                }),
+              ),
+            );
+          }
+          // Put every stream where the meeting's clock says it is: playing if
+          // the transport is, cued and paused when outside its window.
+          const apply = () => {
+            for (const p of timed) {
+              const d = p.audio.duration; // NaN until metadata loads
+              const t = (at - p.epoch) / 1000;
+              const out = t < 0 || (d && t >= d);
+              if (out) {
+                if (!p.audio.paused) p.audio.pause();
+                const cue = d ? Math.min(Math.max(t, 0), d) : 0;
+                if (p.audio.currentTime !== cue) p.audio.currentTime = cue;
+              } else {
+                if (Math.abs(p.audio.currentTime - t) > 0.35)
+                  p.audio.currentTime = Math.max(t, 0);
+                if (playing && p.audio.paused) p.audio.play().catch(() => {});
+                if (!playing && !p.audio.paused) p.audio.pause();
+              }
+            }
+          };
+
+          const paint = () => {
+            play.classList.toggle("going", playing);
+            play.ariaLabel = playing ? "Pause" : "Play";
+            nowEl.textContent = clock((at - base) / 1000);
+            totalEl.textContent = clock((endAt() - base) / 1000);
+            if (!scrubbing) range.value = (at - base) / 1000;
+            range.max = Math.max((endAt() - base) / 1000, 1);
+            const span = Math.max(endAt() - base, 1);
+            for (const bits of laneBits)
+              for (const { bit, p } of bits) {
+                const from = p.epoch;
+                const to = p.audio.duration
+                  ? p.epoch + p.audio.duration * 1000
+                  : endAt();
+                bit.style.left = `${Math.max(0, ((from - base) / span) * 100)}%`;
+                bit.style.width = `${Math.max(0, Math.min(100, ((to - from) / span) * 100))}%`;
+              }
+            // Highlight the line being heard.
+            let now = -1;
+            segments.forEach((s, i) => {
+              if (s.at != null && s.at <= at) now = i;
+            });
+            turns.forEach((t, i) => t.classList.toggle("now", i === now));
+          };
+
+          // While playing, the clock follows whichever streams are running; in
+          // a gap between them it runs on wall time, so the next one joins.
+          // A drag on the scrubber owns the clock until it's released.
+          const tick = (now) => {
+            if (!scrubbing) {
+              const live = timed.filter(
+                (p) => !p.audio.paused && !p.audio.ended,
+              );
+              if (live.length > 0) {
+                at = Math.max(
+                  at,
+                  ...live.map((p) => p.epoch + p.audio.currentTime * 1000),
+                );
+              } else if (
+                timed.every(
+                  (p) =>
+                    // A seek still in flight hasn't landed anywhere yet;
+                    // its ended/paused state is stale until it does.
+                    !p.audio.seeking &&
+                    (p.audio.ended ||
+                      at >= p.epoch + (p.audio.duration || 0) * 1000),
+                )
+              ) {
+                // Nothing left to run: every stream ended, or was parked at
+                // its end by a seek. The transport rests at the meeting's end.
+                playing = false;
+                at = endAt();
+              } else if (last && now > last) {
+                at = Math.min(at + (now - last), endAt());
+              }
+              apply();
+            }
+            last = now;
+            paint();
+            raf = playing || scrubbing ? requestAnimationFrame(tick) : 0;
+          };
+          const start = () => {
+            cancelAnimationFrame(raf);
+            last = 0;
+            raf = requestAnimationFrame(tick);
+          };
+
+          transport = el(
+            "div",
+            { className: "player" },
+            play,
+            nowEl,
+            el("div", { className: "scrub" }, lanes, range),
+            totalEl,
+          );
+          // The streams live in the document, unseen: some browsers won't
+          // play one that was never attached.
+          for (const p of timed) {
+            p.audio.hidden = true;
+            transport.append(p.audio);
+          }
+
+          playFrom = (atMs) => {
+            at = Math.min(Math.max(atMs, base), endAt());
+            playing = true;
+            start();
+            apply();
+            paint();
+          };
+          stopPage = () => {
+            playing = false;
+            scrubbing = false;
+            cancelAnimationFrame(raf);
+            for (const p of players) p.audio.pause();
+          };
+          paint();
+          // Where each stream's audio runs, filled in as durations arrive.
+          for (const p of timed)
+            p.audio.addEventListener("durationchange", paint);
+        }
+
         const showCleaned = (on) => {
           segments.forEach((seg, i) => {
             const line = on ? cleanLines[i] : null;
@@ -606,19 +917,6 @@
                 : "";
           });
         };
-
-        // Highlight the line being heard, following the tab stream's clock.
-        const lead = players.find((p) => p.stem === "tab" && p.epoch != null);
-        if (lead) {
-          lead.audio.addEventListener("timeupdate", () => {
-            const at = lead.epoch + lead.audio.currentTime * 1000;
-            let now = -1;
-            segments.forEach((s, i) => {
-              if (s.at != null && s.at <= at) now = i;
-            });
-            turns.forEach((t, i) => t.classList.toggle("now", i === now));
-          });
-        }
 
         const speakers = [...new Set(segments.map((s) => s.speaker))];
         const bundle = new Blob(
@@ -664,14 +962,28 @@
           );
         }
         if (players.length > 0) {
+          const solos = players.filter((p) => p.epoch == null);
           body.push(
             el(
               "div",
               { className: "players" },
-              ...players.map((p) =>
-                el("label", {}, el("span", { textContent: p.stem }), p.audio),
-              ),
-              ...(timed.length > 1 ? [linkButton] : []),
+              ...(transport ? [transport, pick] : []),
+              ...(solos.length > 0
+                ? [
+                    el(
+                      "div",
+                      { className: "solo" },
+                      ...solos.map((p) =>
+                        el(
+                          "label",
+                          {},
+                          el("span", { textContent: p.stem }),
+                          p.audio,
+                        ),
+                      ),
+                    ),
+                  ]
+                : []),
             ),
           );
         }
@@ -682,7 +994,7 @@
             channels,
             voicesRun,
             origin,
-            players.length > 0 ? seekAll : null,
+            playFrom,
           );
           if (voices) body.push(voices);
           const bar = cleanupBar(id, cleaned, cleanLines, showCleaned);
@@ -947,6 +1259,9 @@
       // recording restarted in the same meeting) already has a record of its
       // earlier parts, shown above the live turns.
       let watching = null;
+      // Stops a shown session's player when the route leaves it: detached
+      // audio elements would keep sounding.
+      let stopPage = null;
       function watchLive(id, earlier) {
         // stream id -> { words, epoch, speakers, open }
         const streams = new Map();
@@ -1190,6 +1505,8 @@
       async function route() {
         watching?.close();
         watching = null;
+        stopPage?.();
+        stopPage = null;
         const m = location.hash.match(/^#\/s\/([0-9a-f-]{36})$/);
         try {
           await (location.hash === "#/vocab"
