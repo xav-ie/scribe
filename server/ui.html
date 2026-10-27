@@ -236,6 +236,16 @@
         font-variant-numeric: tabular-nums;
         color: var(--muted);
       }
+      /* One tap steps the meeting through the usual speeds. */
+      .player .speed {
+        flex: none;
+        min-width: 4ch;
+        padding: 6px 9px;
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--line);
+        font: 12px var(--mono);
+      }
       .scrub {
         position: relative;
         flex: 1;
@@ -344,6 +354,7 @@
         height: 32px;
       }
       .turn {
+        position: relative;
         display: grid;
         grid-template-columns: 56px 1fr;
         gap: 10px;
@@ -370,6 +381,69 @@
       .turn .who {
         font-weight: 600;
         font-size: 12px;
+      }
+      /* The transcript runs down a rail: turns sit apart in proportion to
+         the time between them, so the page reads like the meeting felt. A
+         silence longer than a fifth of the viewport collapses to exactly
+         that, labelled with how long it was. */
+      .timeline {
+        position: relative;
+        padding-left: 18px;
+      }
+      .timeline::before {
+        content: "";
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        bottom: 8px;
+        width: 1px;
+        background: var(--line);
+      }
+      .timeline .gap {
+        position: relative;
+      }
+      .timeline .gap .skip {
+        position: absolute;
+        left: -10px;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--bg);
+        padding: 3px 2px;
+        font: 10px var(--mono);
+        color: var(--muted);
+      }
+      .timeline .turn::before {
+        content: "";
+        position: absolute;
+        left: -13px;
+        top: 13px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--line);
+      }
+      .timeline .turn.now::before {
+        background: var(--rec);
+      }
+      /* The chips up top are filters too: a speaker's turns stay at full
+         voice while the room dims around them. */
+      .speakers {
+        display: flex;
+        flex-wrap: wrap;
+      }
+      button.chip {
+        font-family: inherit;
+        cursor: pointer;
+      }
+      .chip.on {
+        background: var(--c);
+        color: var(--bg);
+      }
+      .timeline.focus .turn {
+        opacity: 0.3;
+      }
+      .timeline.focus .turn.mine {
+        opacity: 1;
       }
       .links a {
         color: var(--link);
@@ -738,6 +812,22 @@
             paint();
           });
 
+          // One tap steps through the usual speeds, and the streams keep
+          // their places on the clock wherever it lands.
+          const RATES = [1, 1.25, 1.5, 2, 0.5];
+          let rateSpot = 0;
+          const speed = el("button", {
+            className: "speed",
+            textContent: "1×",
+            ariaLabel: "Playback speed",
+            onclick: () => {
+              rateSpot = (rateSpot + 1) % RATES.length;
+              for (const p of timed) p.audio.playbackRate = RATES[rateSpot];
+              speed.textContent = `${RATES[rateSpot]}×`;
+              speed.ariaLabel = `Playback speed ${RATES[rateSpot]}×`;
+            },
+          });
+
           const lanes = el("div", { className: "lanes" });
           const laneBits = [];
           pick = el("div", { className: "pick" });
@@ -854,7 +944,9 @@
                 playing = false;
                 at = endAt();
               } else if (last && now > last) {
-                at = Math.min(at + (now - last), endAt());
+                // A gap between streams runs on wall time, at the chosen
+                // pace, so the next one joins when it should.
+                at = Math.min(at + (now - last) * RATES[rateSpot], endAt());
               }
               apply();
             }
@@ -875,6 +967,7 @@
             nowEl,
             el("div", { className: "scrub" }, lanes, range),
             totalEl,
+            speed,
           );
           // The streams live in the document, unseen: some browsers won't
           // play one that was never attached.
@@ -918,7 +1011,65 @@
           });
         };
 
+        // The transcript runs down a rail, turns spaced by when they were
+        // said so the page reads like the meeting felt. A silence longer
+        // than a fifth of the viewport collapses to exactly that, labelled
+        // with how long it ran.
+        const timeline = el("div", { className: "timeline" });
+        turns.forEach((turn, i) => {
+          const seg = segments[i];
+          const prev = segments[i - 1];
+          const gapS =
+            i > 0 && seg.at != null && prev?.at != null
+              ? (seg.at - prev.at) / 1000
+              : 0;
+          if (gapS * 10 >= 8) {
+            const cap = Math.min(gapS * 10, innerHeight / 5);
+            timeline.appendChild(
+              el(
+                "div",
+                { className: "gap", style: `height:${cap}px` },
+                ...(gapS * 10 > innerHeight / 5
+                  ? [
+                      el("span", {
+                        className: "skip",
+                        textContent: clock(gapS),
+                      }),
+                    ]
+                  : []),
+              ),
+            );
+          }
+          timeline.appendChild(turn);
+        });
+
         const speakers = [...new Set(segments.map((s) => s.speaker))];
+        // The chips up top are filters: tap a speaker and their turns stay
+        // lit while the rest of the room dims; tap again to bring it back.
+        let spot = null;
+        const speakerChips = speakers.map((name) => {
+          if (turns.length === 0) return chip(name);
+          const c = el("button", {
+            className: "chip",
+            type: "button",
+            textContent: name,
+            ariaPressed: "false",
+            onclick: () => {
+              spot = spot === name ? null : name;
+              speakerChips.forEach((other, j) => {
+                const on = speakers[j] === spot;
+                other.classList.toggle("on", on);
+                other.setAttribute("aria-pressed", on ? "true" : "false");
+              });
+              timeline.classList.toggle("focus", spot != null);
+              turns.forEach((turn, i) =>
+                turn.classList.toggle("mine", segments[i].speaker === spot),
+              );
+            },
+          });
+          c.style.setProperty("--c", color(name));
+          return c;
+        });
         const bundle = new Blob(
           [JSON.stringify({ sessionId: id, session, channels }, null, 2)],
           {
@@ -930,7 +1081,7 @@
             className: "muted",
             textContent: `${when(session?.startedAt)} · ${session?.platform ?? "unknown platform"}`,
           }),
-          el("div", {}, ...speakers.map(chip)),
+          el("div", { className: "speakers" }, ...speakerChips),
           el(
             "div",
             { className: "links" },
@@ -999,7 +1150,7 @@
           if (voices) body.push(voices);
           const bar = cleanupBar(id, cleaned, cleanLines, showCleaned);
           if (bar) body.push(bar);
-          body.push(el("h2", { textContent: "Transcript" }), ...turns);
+          body.push(el("h2", { textContent: "Transcript" }), timeline);
         } else {
           // No record from the extension (it never reached Stop): show each saved
           // stream's own words.
