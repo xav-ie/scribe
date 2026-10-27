@@ -1,6 +1,6 @@
 {
   "name": "meeting-capture-extension",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Chrome MV3 extension that streams meeting tab audio (Zoom, Google Meet, ...) to a self-hosted streaming ASR service and attributes captions to speakers by scraping the meeting's active-speaker indicator.",
   "type": "module",
   "license": "MIT",
