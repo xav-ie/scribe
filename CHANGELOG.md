@@ -1,3 +1,15 @@
+## 0.1.8 (2026-10-27)
+
+### Fixes
+
+#### Patch four more advisories under NeMo's dependency caps
+
+Overrides take hydra-core to 1.3.8 (two RCEs) and fsspec[http] to 2026.6.0 (ReferenceFileSystem SSTI), while pinned bumps bring opentelemetry-api to 1.45.1 (tracestate parsing) and wandb to 0.31.0; lightning stays at 2.4.0 because every nv-one-logger release fails to import against 2.6.x, so that advisory waits on upstream, and the validated environment already runs the patched pytorch-lightning 2.6.6.
+
+#### Refresh dependencies with security fixes
+
+The server's pinned environment moves to FastAPI 0.162 (Starlette 1.10) with patched Pillow, aiohttp, certifi, filelock, and setuptools, and the extension builds on Vite 8.3.4, clearing 68 of 73 open dependency alerts.
+
 ## 0.1.7 (2026-10-27)
 
 ### Fixes
