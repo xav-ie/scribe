@@ -12,6 +12,22 @@ dependencies = [
 
 [tool.uv]
 package = false
+# NeMo 3.0.0 caps hydra-core<=1.3.2, below the versions that fix
+# GHSA-2cp2-2r3c-7p7r and GHSA-c3wx-c55w-pxjq (hydra instantiate RCE),
+# and lightning 2.4.0 caps fsspec<2026.0, below the version that fixes
+# GHSA-27vj-qcqg-25rc (fsspec SSTI RCE). Override both caps so the
+# fixes install; everything else still resolves under the validated
+# pins below. lightning itself stays 2.4.0: every nv-one-logger release
+# (2.0.0-2.3.1, latest) fails to import against lightning>=2.6 because
+# `overrides` rejects its save_checkpoint signature, and NeMo imports
+# that module unconditionally — so GHSA-qqmf-gpg7-g8gw stays open until
+# upstream fixes it. scribe never loads untrusted checkpoints (its one
+# model comes from NVIDIA's hub) and pytorch-lightning 2.6.6, the
+# runtime pair NeMo drives, is already patched.
+override-dependencies = [
+  "hydra-core==1.3.8",
+  "fsspec[http]==2026.6.0",
+]
 # The full environment the server was validated with (NeMo 3.0.0, torch 2.14.0).
 constraint-dependencies = [
   "absl-py==2.5.0",
@@ -42,7 +58,7 @@ constraint-dependencies = [
   "einops==0.8.2",
   "filelock==4.2.1",
   "frozenlist==1.8.0",
-  "fsspec==2025.12.0",
+  "fsspec==2026.6.0",
   "googleapis-common-protos==1.75.5",
   "grpcio==1.84.0",
   "h11==0.16.0",
@@ -51,7 +67,7 @@ constraint-dependencies = [
   "httpx==0.28.1",
   "huggingface-hub==1.33.0",
   "humanize==4.16.0",
-  "hydra-core==1.3.2",
+  "hydra-core==1.3.8",
   "idna==3.20",
   "indic-numtowords==1.1.0",
   "intervaltree==3.2.1",
@@ -102,14 +118,14 @@ constraint-dependencies = [
   "nvidia-nvtx==13.0.85",
   "omegaconf==2.3.0",
   "onnx==1.23.1",
-  "opentelemetry-api==1.45.0",
-  "opentelemetry-exporter-http-transport==0.66b0",
-  "opentelemetry-exporter-otlp-common==0.66b0",
-  "opentelemetry-exporter-otlp-proto-common==1.45.0",
-  "opentelemetry-exporter-otlp-proto-http==1.45.0",
-  "opentelemetry-proto==1.45.0",
-  "opentelemetry-sdk==1.45.0",
-  "opentelemetry-semantic-conventions==0.66b0",
+  "opentelemetry-api==1.45.1",
+  "opentelemetry-exporter-http-transport==0.66b1",
+  "opentelemetry-exporter-otlp-common==0.66b1",
+  "opentelemetry-exporter-otlp-proto-common==1.45.1",
+  "opentelemetry-exporter-otlp-proto-http==1.45.1",
+  "opentelemetry-proto==1.45.1",
+  "opentelemetry-sdk==1.45.1",
+  "opentelemetry-semantic-conventions==0.66b1",
   "overrides==7.7.0",
   "packaging==24.2",
   "pandas==3.0.6",
@@ -166,7 +182,7 @@ constraint-dependencies = [
   "typing-extensions==4.16.0",
   "typing-inspection==0.4.4",
   "urllib3==2.8.0",
-  "wandb==0.30.0",
+  "wandb==0.31.0",
   "webdataset==1.0.2",
   "werkzeug==3.1.9",
   "whisper-normalizer==0.1.15",
