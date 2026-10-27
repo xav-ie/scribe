@@ -236,14 +236,14 @@
         font-variant-numeric: tabular-nums;
         color: var(--muted);
       }
-      /* One tap steps the meeting through the usual speeds. */
+      /* A menu of the usual speeds, one tap away — no cycling. */
       .player .speed {
         flex: none;
-        min-width: 4ch;
-        padding: 6px 9px;
+        padding: 5px 4px;
         background: var(--surface);
         color: var(--text);
         border: 1px solid var(--line);
+        border-radius: 6px;
         font: 12px var(--mono);
       }
       .scrub {
@@ -812,21 +812,22 @@
             paint();
           });
 
-          // One tap steps through the usual speeds, and the streams keep
-          // their places on the clock wherever it lands.
-          const RATES = [1, 1.25, 1.5, 2, 0.5];
-          let rateSpot = 0;
-          const speed = el("button", {
-            className: "speed",
-            textContent: "1×",
-            ariaLabel: "Playback speed",
-            onclick: () => {
-              rateSpot = (rateSpot + 1) % RATES.length;
-              for (const p of timed) p.audio.playbackRate = RATES[rateSpot];
-              speed.textContent = `${RATES[rateSpot]}×`;
-              speed.ariaLabel = `Playback speed ${RATES[rateSpot]}×`;
+          // The speeds sit in a menu, one tap away, and the streams keep
+          // their places on the clock wherever the pace lands.
+          const speed = el(
+            "select",
+            {
+              className: "speed",
+              ariaLabel: "Playback speed",
+              onchange: () => {
+                for (const p of timed)
+                  p.audio.playbackRate = Number(speed.value);
+              },
             },
-          });
+            ...[0.5, 1, 1.25, 1.5, 2].map((rate) =>
+              el("option", { value: rate, selected: rate === 1 }, `${rate}×`),
+            ),
+          );
 
           const lanes = el("div", { className: "lanes" });
           const laneBits = [];
@@ -946,7 +947,7 @@
               } else if (last && now > last) {
                 // A gap between streams runs on wall time, at the chosen
                 // pace, so the next one joins when it should.
-                at = Math.min(at + (now - last) * RATES[rateSpot], endAt());
+                at = Math.min(at + (now - last) * Number(speed.value), endAt());
               }
               apply();
             }
