@@ -858,6 +858,43 @@ chrome.runtime.onStartup.addListener(() => {
   reconcileStaleState().catch(() => {});
 });
 
+// --- reload into a new build (unpacked installs) ---------------------------
+// An unpacked extension reads its files from disk, so a build copied over its
+// folder shows up in the manifest there while the old one keeps running.
+// Reload into it once nothing is recording, instead of someone clicking reload
+// on chrome://extensions. Store installs are updated by Chrome itself.
+const BUILD_CHECK = 'build-check';
+
+async function reloadIfRebuilt(): Promise<void> {
+  const response = await fetch(chrome.runtime.getURL('manifest.json'), {
+    cache: 'no-store',
+  });
+  const manifest = (await response.json()) as { version_name?: string };
+  const onDisk = manifest.version_name;
+  if (!onDisk || onDisk === BUILD) return;
+  const { status } = await getState();
+  if (status !== 'idle') return;
+  await chrome.storage.local.set({
+    lastReload: { from: BUILD, to: onDisk, at: Date.now() },
+  });
+  chrome.runtime.reload();
+}
+
+async function watchForNewBuilds(): Promise<void> {
+  try {
+    const { installType } = await chrome.management.getSelf();
+    if (installType !== 'development') return;
+    await chrome.alarms.create(BUILD_CHECK, { periodInMinutes: 1 });
+  } catch (error) {
+    dlog('[bg] build watch failed:', errorMessage(error));
+  }
+}
+
+chrome.alarms.onAlarm.addListener(({ name }) => {
+  if (name === BUILD_CHECK) reloadIfRebuilt().catch(() => {});
+});
+void watchForNewBuilds();
+
 // --- debug + live settings ----------------------------------------------
 // Keep the debug flag in sync with the popup toggle (no reload needed).
 chrome.storage.sync.get({ debug: false }, (s) => setDebug(Boolean(s.debug)));
