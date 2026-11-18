@@ -61,6 +61,8 @@ export default defineConfig([
       // read worse here than the code they replace.
       'unicorn/consistent-boolean-name': 'off',
       'unicorn/single-line-block-comment-style': 'off',
+      // Doc comments keep the standard ` * ` prefix TSDoc and editors use.
+      'unicorn/no-asterisk-prefix-in-documentation-comments': 'off',
       'unicorn/prefer-ternary': 'off',
       'unicorn/prefer-early-return': 'off',
       'unicorn/prefer-continue': 'off',
@@ -73,6 +75,14 @@ export default defineConfig([
       'unicorn/prefer-then-catch': 'off',
       // `null` is part of the chrome/DOM API surface we mirror.
       'unicorn/no-null': 'off',
+    },
+  },
+  {
+    // Build configs are evaluated once by their tool; computing the default
+    // export at the top level is what they're for.
+    files: ['eslint.config.js', 'manifest.config.ts', 'vite.config.ts'],
+    rules: {
+      'unicorn/no-top-level-side-effects': 'off',
     },
   },
   {
