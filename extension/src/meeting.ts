@@ -29,6 +29,19 @@ export function meetingKey(url: string | null): string | null {
   return zoom ? `zoom:${zoom}` : url.replace(/\/$/, '');
 }
 
+/**
+ * Whether a recording's tab, recorded in `meeting`, has moved to an address
+ * outside it: Zoom's web client goes to /wc/home when the meeting ends, which
+ * leaves the tab open and its capture running.
+ */
+export function leftMeeting(
+  meeting: string | null,
+  tabUrl: string | undefined,
+): boolean {
+  const key = meetingKey(meeting);
+  return key !== null && meetingKey(meetingUrl(tabUrl)) !== key;
+}
+
 // Tab titles that name the client, not the meeting.
 const GENERIC_TITLE = /^(?:zoom(?: meeting| workplace)?|(?:google )?meet)$/i;
 const MEET_CODE = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/;

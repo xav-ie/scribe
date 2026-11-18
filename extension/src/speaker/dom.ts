@@ -52,6 +52,53 @@ export function isVisible(el: Element | null): el is HTMLElement {
   return el.offsetParent !== null || style.position === 'fixed';
 }
 
+// What a meeting client shows once you are out of the call, matched per line
+// of visible text. Long lines are skipped so chat messages aren't copied.
+const END_PHRASES: readonly string[] = [
+  'meeting has been ended',
+  'meeting has ended',
+  'meeting ended',
+  'ended the meeting',
+  'ended this meeting',
+  'meeting is over',
+  'call ended',
+  'call has ended',
+  'you left',
+  'have left',
+  "'ve left",
+  'left the meeting',
+  'removed from',
+  'removed you',
+  'return to home',
+  'rejoin',
+];
+const MAX_NOTICE_LENGTH = 120;
+
+/** The lines of `text` that say the call is over, at most five. */
+export function endNoticesIn(text: string): string[] {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (line.length > MAX_NOTICE_LENGTH) return false;
+      const lower = line.toLowerCase();
+      return END_PHRASES.some((phrase) => lower.includes(phrase));
+    });
+  return [...new Set(lines)].slice(0, 5);
+}
+
+/** Visible lines on the meeting page saying the call is over. */
+export function endNotices(): string[] {
+  return endNoticesIn(
+    meetingDocuments()
+      // Only innerText leaves out hidden elements and breaks lines between
+      // blocks, which is what makes a line a notice.
+      // eslint-disable-next-line unicorn/prefer-dom-node-text-content
+      .map((d) => d.body?.innerText ?? '')
+      .join('\n'),
+  );
+}
+
 /** A compact map of the meeting page, for re-tuning adapter selectors. */
 export interface DomProbe {
   frames: { id: string; src: string }[];

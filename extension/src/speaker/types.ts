@@ -19,6 +19,10 @@ export interface SpeakerDiagnostics {
   muted?: boolean | null;
   /** Page map attached while the adapter finds no tiles (see domProbe). */
   probe?: DomProbe;
+  /** The reporting frame: "top", or an iframe's address without its query. */
+  frame?: string;
+  /** Visible lines saying the call is over (see endNotices). */
+  ended?: string[];
 }
 
 export interface SpeakerAdapter {
