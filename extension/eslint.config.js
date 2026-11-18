@@ -61,8 +61,6 @@ export default defineConfig([
       // read worse here than the code they replace.
       'unicorn/consistent-boolean-name': 'off',
       'unicorn/single-line-block-comment-style': 'off',
-      // Doc comments keep the standard ` * ` prefix TSDoc and editors use.
-      'unicorn/no-asterisk-prefix-in-documentation-comments': 'off',
       'unicorn/prefer-ternary': 'off',
       'unicorn/prefer-early-return': 'off',
       'unicorn/prefer-continue': 'off',

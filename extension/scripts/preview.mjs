@@ -68,10 +68,10 @@ const TYPES = {
 };
 
 /**
- * Serve dist/ on a free port. Every HTML page gets the stub for `state()`'s
- * current value; `pages` adds extra routes: HTML text, or { type, body } for
- * anything else. Resolves to { url, close }.
- */
+Serve dist/ on a free port. Every HTML page gets the stub for `state()`'s
+current value; `pages` adds extra routes: HTML text, or { type, body } for
+anything else. Resolves to { url, close }.
+*/
 export async function servePreview(state, pages = {}) {
   const server = createServer((req, res) => {
     const { pathname } = new URL(req.url ?? '/', 'http://localhost');

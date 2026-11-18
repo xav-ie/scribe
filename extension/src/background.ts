@@ -63,8 +63,10 @@ interface JoinSession {
   title: string | null;
   /** The captured tab; only its content script's diagnostics are kept. */
   tabId: number | null;
-  /** The settings it records under, which the streaming service acts on once
-   * the record arrives: correct speakers by voice, then keep the audio or not. */
+  /**
+  The settings it records under, which the streaming service acts on once
+  the record arrives: correct speakers by voice, then keep the audio or not.
+  */
   saveAudio: boolean;
   voices: boolean;
   /** Meeting client, from the captured tab's host (meet, zoom, or the host). */

@@ -44,11 +44,11 @@ export interface Channel {
 const UNKNOWN_SPEAKER = 'Unknown';
 
 /**
- * Apply one streamed update: the stream's words from index `from` on are
- * replaced by `words` (only the last word sent before can still change). An
- * update starting past the words held means some went missing; it is refused
- * (false) so the caller can ask for the full list instead.
- */
+Apply one streamed update: the stream's words from index `from` on are
+replaced by `words` (only the last word sent before can still change). An
+update starting past the words held means some went missing; it is refused
+(false) so the caller can ask for the full list instead.
+*/
 export function applyWords(
   target: Word[],
   from: number,
@@ -92,13 +92,13 @@ function stamp(
 }
 
 /**
- * Merge the tab streams (attributed via the active-speaker timeline; one per
- * capture, so a resumed recording has several) and the mic streams (always the
- * local user) into one time-ordered, speaker-grouped script.
- * Each word is stamped with its wall-clock time (`epoch + wordSeconds*1000`) so
- * the two independently-timed streams interleave correctly; `start`/`end` on the
- * returned segments are seconds from the first word.
- */
+Merge the tab streams (attributed via the active-speaker timeline; one per
+capture, so a resumed recording has several) and the mic streams (always the
+local user) into one time-ordered, speaker-grouped script.
+Each word is stamped with its wall-clock time (`epoch + wordSeconds*1000`) so
+the two independently-timed streams interleave correctly; `start`/`end` on the
+returned segments are seconds from the first word.
+*/
 export function mergeTranscript(
   tab: readonly Channel[],
   mic: readonly Channel[],
