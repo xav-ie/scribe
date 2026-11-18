@@ -32,7 +32,7 @@ import {
   type Word,
 } from './transcript';
 import type { Message } from './types';
-import { meetingKey, meetingTitle, meetingUrl } from './meeting';
+import { leftMeeting, meetingKey, meetingTitle, meetingUrl } from './meeting';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
 // Adapter snapshots arrive every 10 s; keep about two hours of them.
@@ -449,6 +449,25 @@ async function stopRecording(): Promise<void> {
     await finishSession();
   }
 }
+
+// A meeting that ends can leave its tab open on another page (Zoom's web
+// client goes to /wc/home), whose capture would record silence for hours.
+const LEFT_MEETING =
+  'The meeting tab left the meeting, so the recording stopped.';
+
+async function onTabUrl(tabId: number, url: string): Promise<void> {
+  const s = await session();
+  if (!s.active || s.tabId !== tabId || !leftMeeting(s.url, url)) return;
+  const { status } = await getState();
+  if (status !== 'recording') return;
+  dlog('[bg] meeting tab left the meeting:', meetingUrl(url));
+  await stopRecording();
+  await setState({ warning: LEFT_MEETING });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, { url }) => {
+  if (url) onTabUrl(tabId, url).catch(() => {});
+});
 
 function platformOf(url: string | undefined): string | null {
   if (!url) return null;

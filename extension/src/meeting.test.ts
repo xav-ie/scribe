@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { meetingKey, meetingTitle, meetingUrl } from './meeting';
+import { leftMeeting, meetingKey, meetingTitle, meetingUrl } from './meeting';
 
 describe('meetingUrl', () => {
   it('drops the query, which holds the Zoom passcode', () => {
@@ -39,6 +39,30 @@ describe('meetingKey', () => {
 
   it('is null without a URL', () => {
     expect(meetingKey(null)).toBeNull();
+  });
+});
+
+describe('leftMeeting', () => {
+  const zoom = 'https://app.zoom.us/wc/86012345678/join';
+  const meet = 'https://meet.google.com/abc-defg-hij';
+
+  it('is true once the tab leaves the meeting', () => {
+    expect(leftMeeting(zoom, 'https://app.zoom.us/wc/home')).toBe(true);
+    expect(leftMeeting(zoom, 'https://app.zoom.us/wc/86099999999/join')).toBe(
+      true,
+    );
+    expect(leftMeeting(meet, 'https://meet.google.com/landing')).toBe(true);
+  });
+
+  it('is false while the tab stays in the meeting', () => {
+    expect(
+      leftMeeting(zoom, 'https://app.zoom.us/wc/86012345678/start?pwd=x'),
+    ).toBe(false);
+    expect(leftMeeting(meet, `${meet}?authuser=0`)).toBe(false);
+  });
+
+  it('is false without a meeting to compare against', () => {
+    expect(leftMeeting(null, 'https://app.zoom.us/wc/home')).toBe(false);
   });
 });
 
