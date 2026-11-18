@@ -76,6 +76,14 @@ export default defineConfig([
     },
   },
   {
+    // Build configs are evaluated once by their tool; computing the default
+    // export at the top level is what they're for.
+    files: ['eslint.config.js', 'manifest.config.ts', 'vite.config.ts'],
+    rules: {
+      'unicorn/no-top-level-side-effects': 'off',
+    },
+  },
+  {
     // Local development servers are plain ws:// and http:// on localhost.
     files: ['manifest.config.ts'],
     rules: {

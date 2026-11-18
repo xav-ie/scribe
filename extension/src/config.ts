@@ -10,12 +10,16 @@ export interface Settings {
   wsUrl: string;
   /** Log active-speaker detection + streaming diagnostics to the console. */
   debug: boolean;
-  /** Ask the streaming service to keep the audio it receives, per session. On
-   * by default: replaying audio next to its transcript is half the web UI. */
+  /**
+  Ask the streaming service to keep the audio it receives, per session. On
+  by default: replaying audio next to its transcript is half the web UI.
+  */
   saveAudio: boolean;
-  /** Ask the streaming service to correct speakers by voice once the recording
-   * ends, which keeps the tab audio there until it's done (then drops it,
-   * unless saveAudio is on). */
+  /**
+  Ask the streaming service to correct speakers by voice once the recording
+  ends, which keeps the tab audio there until it's done (then drops it,
+  unless saveAudio is on).
+  */
   voices: boolean;
 }
 
@@ -36,10 +40,10 @@ export async function setSettings(patch: Partial<Settings>): Promise<void> {
 }
 
 /**
- * The server URL as saved, split into the WebSocket URL and the access token
- * from its `#token=…` part (the web UI's Pair page gives that form). WebSocket
- * URLs can't carry a fragment, so the token travels in the first message.
- */
+The server URL as saved, split into the WebSocket URL and the access token
+from its `#token=…` part (the web UI's Pair page gives that form). WebSocket
+URLs can't carry a fragment, so the token travels in the first message.
+*/
 export function splitServerUrl(wsUrl: string): { url: string; token?: string } {
   const url = new URL(wsUrl);
   const token =
@@ -80,10 +84,10 @@ export function serverOrigins(wsUrl: string): string[] {
 }
 
 /**
- * What the server says about this URL: `ok` (its token is right), `open` (it
- * has no token at all), `needs-token` (it wants one and the URL carries none),
- * `bad-token` (it refuses this one), or `unreachable` (no usable answer).
- */
+What the server says about this URL: `ok` (its token is right), `open` (it
+has no token at all), `needs-token` (it wants one and the URL carries none),
+`bad-token` (it refuses this one), or `unreachable` (no usable answer).
+*/
 export type ServerCheck =
   'ok' | 'open' | 'needs-token' | 'bad-token' | 'unreachable';
 
@@ -152,10 +156,10 @@ export async function saveServerUrl(wsUrl: string): Promise<SaveResult> {
 }
 
 /**
- * Ask Chrome for access to the server's host, then check and save it. Chrome
- * only asks during a user gesture, so call this straight from the click that
- * asks for it: the request comes before any await.
- */
+Ask Chrome for access to the server's host, then check and save it. Chrome
+only asks during a user gesture, so call this straight from the click that
+asks for it: the request comes before any await.
+*/
 export async function grantServerAccess(
   wsUrl: string,
   origins: string[],

@@ -30,17 +30,17 @@ export interface SpeakerAdapter {
   /** Whether this adapter handles the current page. */
   matches(host: string): boolean;
   /**
-   * Begin detecting; call `onSpeaker(name)` whenever the active speaker changes.
-   * Meet's speaking signal is an animated indicator mutating (needs a
-   * MutationObserver); Zoom's is a stable `--active` class (polled). Returns a
-   * stop function.
-   */
+  Begin detecting; call `onSpeaker(name)` whenever the active speaker changes.
+  Meet's speaking signal is an animated indicator mutating (needs a
+  MutationObserver); Zoom's is a stable `--active` class (polled). Returns a
+  stop function.
+  */
   start(onSpeaker: (name: string) => void): () => void;
   /**
-   * The local user's own mic mute state from the meeting toolbar, or null if it
-   * can't be determined (in which case the mic isn't gated). Used to avoid
-   * recording your own muted self-talk.
-   */
+  The local user's own mic mute state from the meeting toolbar, or null if it
+  can't be determined (in which case the mic isn't gated). Used to avoid
+  recording your own muted self-talk.
+  */
   isMuted?(): boolean | null;
   /** Snapshot for debug logging while tuning selectors. */
   diagnose(): SpeakerDiagnostics;

@@ -156,9 +156,9 @@ function probeDocument(
 }
 
 /**
- * Probe the page, any same-origin iframes (the meeting UI may live in one) and
- * an open picture-in-picture window.
- */
+Probe the page, any same-origin iframes (the meeting UI may live in one) and
+an open picture-in-picture window.
+*/
 export function domProbe(): DomProbe {
   const iframes = [...document.querySelectorAll('iframe')];
   const documents = [probeDocument(document, 'top')];
