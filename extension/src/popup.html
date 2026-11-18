@@ -47,8 +47,18 @@
 
     <button id="record" class="primary">Start recording</button>
 
-    <div id="error" class="error hidden"></div>
-    <div id="warning" class="warning hidden"></div>
+    <div id="error" class="error notice hidden">
+      <span class="text"></span>
+      <button class="dismiss" aria-label="Dismiss error" title="Dismiss">
+        ×
+      </button>
+    </div>
+    <div id="warning" class="warning notice hidden">
+      <span class="text"></span>
+      <button class="dismiss" aria-label="Dismiss warning" title="Dismiss">
+        ×
+      </button>
+    </div>
     <div id="insecure" class="warning hidden">
       This server has no access token: anyone who can reach it can stream to it
       and read every meeting, even on this machine. Set SCRIBE_TOKEN_FILE on the

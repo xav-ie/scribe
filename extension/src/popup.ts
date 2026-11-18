@@ -4,6 +4,7 @@ import {
   getState,
   JOIN_SESSION_KEY,
   onStateChange,
+  setState,
   type RecState,
 } from './state';
 import type { Message, RecordingStatus } from './types';
@@ -49,14 +50,8 @@ function render(state: RecState): void {
   voicesToggle.disabled = state.status !== 'idle';
   saveAudioNote.classList.toggle('hidden', state.status === 'idle');
 
-  if (state.error) {
-    errorEl.textContent = state.error;
-    errorEl.classList.remove('hidden');
-  } else {
-    errorEl.classList.add('hidden');
-  }
-  warningEl.textContent = state.warning ?? '';
-  warningEl.classList.toggle('hidden', !state.warning);
+  showNotice(errorEl, state.error);
+  showNotice(warningEl, state.warning);
   insecureEl.classList.toggle('hidden', !state.insecure);
 
   if (state.segments && state.segments.length > 0) {
@@ -66,6 +61,22 @@ function render(state: RecState): void {
   } else {
     resultEl.classList.add('hidden');
   }
+}
+
+function showNotice(el: HTMLElement, text: string | undefined): void {
+  el.querySelector('.text')!.textContent = text ?? '';
+  el.classList.toggle('hidden', !text);
+}
+
+// A message outlives the recording it was about, through reloads and
+// restarts, until the next start; the × clears it now.
+for (const [el, key] of [
+  [errorEl, 'error'],
+  [warningEl, 'warning'],
+] as const) {
+  el.querySelector('.dismiss')!.addEventListener('click', () => {
+    setState({ [key]: undefined }).catch(() => {});
+  });
 }
 
 function applyMicPermission(permission: PermissionState): void {
