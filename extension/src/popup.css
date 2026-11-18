@@ -213,6 +213,15 @@ button.secondary {
   display: none;
 }
 
+.result-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+#clearTranscript.hidden {
+  display: none;
+}
+
 .notice {
   display: flex;
   gap: 8px;

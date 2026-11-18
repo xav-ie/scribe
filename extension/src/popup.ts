@@ -33,6 +33,8 @@ const errorEl = $<HTMLElement>('error');
 const warningEl = $<HTMLElement>('warning');
 const insecureEl = $<HTMLElement>('insecure');
 const resultEl = $<HTMLElement>('result');
+const resultTitle = $<HTMLElement>('resultTitle');
+const clearTranscriptBtn = $<HTMLButtonElement>('clearTranscript');
 const speakersEl = $<HTMLElement>('speakers');
 const transcriptEl = $<HTMLElement>('transcript');
 
@@ -53,6 +55,10 @@ function render(state: RecState): void {
   showNotice(errorEl, state.error);
   showNotice(warningEl, state.warning);
   insecureEl.classList.toggle('hidden', !state.insecure);
+
+  const idle = state.status === 'idle';
+  resultTitle.textContent = idle ? 'Last transcript' : 'Live transcript';
+  clearTranscriptBtn.classList.toggle('hidden', !idle);
 
   if (state.segments && state.segments.length > 0) {
     renderSegments(state.segments);
@@ -78,6 +84,12 @@ for (const [el, key] of [
     setState({ [key]: undefined }).catch(() => {});
   });
 }
+
+// Only the popup's copy: the session stays saved on the streaming service.
+// Hidden while recording, which would fill it straight back in.
+clearTranscriptBtn.addEventListener('click', () => {
+  setState({ segments: [], rawText: '' }).catch(() => {});
+});
 
 function applyMicPermission(permission: PermissionState): void {
   const granted = permission === 'granted';
