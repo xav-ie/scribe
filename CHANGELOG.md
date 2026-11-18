@@ -1,3 +1,23 @@
+## 0.1.9 (2026-11-18)
+
+### Fixes
+
+#### Dismiss the popup's messages and last transcript
+
+The popup's error and warning each have a × that clears them, and once a recording has ended, a Clear link empties its transcript from the popup (the session stays saved on the server). Before, all of these stayed until the next recording started, through reloads and restarts.
+
+#### Session records show how a recording ended
+
+Each session record now says what stopped the recording, logs the meeting tab's address and title changes, and notes any "meeting ended" or "you left" text on the page along with which frame reported it. Snapshots of the meeting page are kept only when something changes, plus one every five minutes, so a long recording keeps its ending instead of only its last two hours.
+
+#### Unpacked installs reload into a new build on their own
+
+An unpacked extension now checks once a minute for a newer build in its folder and reloads into it once nothing is recording, so updating a test install no longer needs a click on the extensions page. `extension/scripts/sync.sh host:path` builds the extension and copies it there. Store installs are unaffected.
+
+#### Leaving the meeting stops the recording
+
+When the meeting tab moves off the meeting, such as Zoom's web client returning to its home page after the meeting ends, the recording now stops with a warning. Before, the tab stayed open and kept recording silence until stopped by hand.
+
 ## 0.1.8 (2026-10-27)
 
 ### Fixes
