@@ -37,6 +37,8 @@ export default defineManifest({
   // extension was (re)loaded, which Chrome skips.
   permissions: [
     'tabCapture',
+    // A minute timer for unpacked installs to reload into a newer build.
+    'alarms',
     'offscreen',
     'storage',
     'activeTab',

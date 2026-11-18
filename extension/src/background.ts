@@ -17,6 +17,7 @@ import {
 } from './config';
 import { dlog, expose, setDebug } from './debug';
 import type { SpeakerDiagnostics } from './speaker/types';
+import { keepSnapshot, type Snapshot } from './diagnostics';
 import {
   getState,
   onStateChange,
@@ -32,11 +33,13 @@ import {
   type Word,
 } from './transcript';
 import type { Message } from './types';
-import { meetingKey, meetingTitle, meetingUrl } from './meeting';
+import { leftMeeting, meetingKey, meetingTitle, meetingUrl } from './meeting';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
-// Adapter snapshots arrive every 10 s; keep about two hours of them.
-const MAX_DIAGNOSTICS = 720;
+// Adapter snapshots are kept only when they change (see keepSnapshot); this
+// caps a session that changes every 10 s at about five and a half hours.
+const MAX_DIAGNOSTICS = 2000;
+const MAX_TAB_LOG = 200;
 
 // Restarting a recording in the same meeting this soon after the last one
 // stopped resumes that session: one transcript and one set of saved audio.
@@ -60,8 +63,10 @@ interface JoinSession {
   title: string | null;
   /** The captured tab; only its content script's diagnostics are kept. */
   tabId: number | null;
-  /** The settings it records under, which the streaming service acts on once
-   * the record arrives: correct speakers by voice, then keep the audio or not. */
+  /**
+  The settings it records under, which the streaming service acts on once
+  the record arrives: correct speakers by voice, then keep the audio or not.
+  */
   saveAudio: boolean;
   voices: boolean;
   /** Meeting client, from the captured tab's host (meet, zoom, or the host). */
@@ -72,7 +77,18 @@ interface JoinSession {
   /** One entry per mic stream: the mic reopening (a new device) opens a new one. */
   mic: Stream[];
   /** What the platform adapter saw during the recording, for debug bundles. */
-  diagnostics: (SpeakerDiagnostics & { platform: string; at: number })[];
+  diagnostics: Snapshot[];
+  /** The captured tab's address, title and load changes while recording. */
+  tabLog: TabChange[];
+  /** What ended the recording: the stop button, the tab, the server... */
+  stopReason: string | null;
+}
+
+interface TabChange {
+  at: number;
+  url?: string | null;
+  title?: string;
+  status?: string;
 }
 
 // A fresh session every time: the lists are mutated in place, so they must
@@ -94,6 +110,8 @@ function emptySession(): JoinSession {
     tab: [],
     mic: [],
     diagnostics: [],
+    tabLog: [],
+    stopReason: null,
   };
 }
 
@@ -221,7 +239,10 @@ async function startRecording(): Promise<void> {
   }
   // The last recording may still be waiting for its final words.
   const previous = await session();
-  if (previous.active) await finishSession();
+  if (previous.active) {
+    previous.stopReason ??= 'a new recording started';
+    await finishSession();
+  }
 
   const url = meetingUrl(tab.url);
   const captureId = crypto.randomUUID();
@@ -234,6 +255,7 @@ async function startRecording(): Promise<void> {
     mem = {
       ...previous,
       active: true,
+      stopReason: null,
       captureId,
       url,
       title: meetingTitle(tab.title) ?? previous.title,
@@ -359,6 +381,8 @@ let startTimer: ReturnType<typeof setTimeout> | undefined;
 async function failSilentStart(): Promise<void> {
   const { status } = await getState();
   if (status !== 'recording') return;
+  const current = await session();
+  current.stopReason ??= 'the audio capture never started';
   chrome.runtime
     .sendMessage({
       type: 'OFFSCREEN_STOP',
@@ -424,9 +448,11 @@ let capturing: string | null = null;
 // then reports idle, which finishes the session; this is the backstop.
 const FINISH_TIMEOUT_MS = 10_000;
 
-async function stopRecording(): Promise<void> {
+async function stopRecording(reason = 'the stop button'): Promise<void> {
   const { status } = await getState();
   if (status !== 'recording') return;
+  const current = await session();
+  current.stopReason ??= reason;
   // Stop capturing first; the upload may be slow and must not hold it open.
   chrome.runtime
     .sendMessage({
@@ -449,6 +475,40 @@ async function stopRecording(): Promise<void> {
     await finishSession();
   }
 }
+
+// A meeting that ends can leave its tab open on another page (Zoom's web
+// client goes to /wc/home), whose capture would record silence for hours.
+const LEFT_MEETING =
+  'The meeting tab left the meeting, so the recording stopped.';
+
+// Every address, title and load change of the captured tab goes in the
+// session, so a record shows where the tab was when the meeting ended.
+async function onTabUpdated(
+  tabId: number,
+  { url, title, status }: chrome.tabs.OnUpdatedInfo,
+): Promise<void> {
+  if (url === undefined && title === undefined && status === undefined) return;
+  const s = await session();
+  if (!s.active || s.tabId !== tabId) return;
+  s.tabLog.push({
+    at: Date.now(),
+    ...(url !== undefined && { url: meetingUrl(url) }),
+    ...(title !== undefined && { title }),
+    ...(status !== undefined && { status }),
+  });
+  s.tabLog.splice(0, s.tabLog.length - MAX_TAB_LOG);
+  saveSession();
+  if (url === undefined || !leftMeeting(s.url, url)) return;
+  const state = await getState();
+  if (state.status !== 'recording') return;
+  dlog('[bg] meeting tab left the meeting:', meetingUrl(url));
+  await stopRecording('the tab left the meeting');
+  await setState({ warning: LEFT_MEETING });
+}
+
+chrome.tabs.onUpdated.addListener((tabId, change) => {
+  onTabUpdated(tabId, change).catch(() => {});
+});
 
 function platformOf(url: string | undefined): string | null {
   if (!url) return null;
@@ -648,6 +708,8 @@ async function onStateUpdate(
     return;
   }
   if (patch.status !== undefined) clearTimeout(startTimer);
+  if (patch.status === 'idle')
+    s.stopReason ??= patch.error ?? patch.warning ?? 'the capture ended';
   await setState(patch);
   if (patch.status === 'idle') await finishSession();
 }
@@ -660,7 +722,9 @@ async function onSpeakerDiag(
 ): Promise<void> {
   const s = await session();
   if (!s.active || tabId !== s.tabId) return;
-  s.diagnostics.push({ ...diag, platform, at });
+  const snapshot = { ...diag, platform, at };
+  if (!keepSnapshot(s.diagnostics, snapshot)) return;
+  s.diagnostics.push(snapshot);
   s.diagnostics.splice(0, s.diagnostics.length - MAX_DIAGNOSTICS);
   saveSession();
 }
@@ -723,6 +787,8 @@ async function reconcileStaleState(): Promise<void> {
   const { status } = await getState();
   if (status !== 'idle' && !(await hasOffscreenDocument())) {
     await setState({ status: 'idle' });
+    const current = await session();
+    current.stopReason ??= 'the browser or extension restarted';
     await finishSession();
   }
 }
@@ -793,6 +859,43 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
 chrome.runtime.onStartup.addListener(() => {
   reconcileStaleState().catch(() => {});
 });
+
+// --- reload into a new build (unpacked installs) ---------------------------
+// An unpacked extension reads its files from disk, so a build copied over its
+// folder shows up in the manifest there while the old one keeps running.
+// Reload into it once nothing is recording, instead of someone clicking reload
+// on chrome://extensions. Store installs are updated by Chrome itself.
+const BUILD_CHECK = 'build-check';
+
+async function reloadIfRebuilt(): Promise<void> {
+  const response = await fetch(chrome.runtime.getURL('manifest.json'), {
+    cache: 'no-store',
+  });
+  const manifest = (await response.json()) as { version_name?: string };
+  const onDisk = manifest.version_name;
+  if (!onDisk || onDisk === BUILD) return;
+  const { status } = await getState();
+  if (status !== 'idle') return;
+  await chrome.storage.local.set({
+    lastReload: { from: BUILD, to: onDisk, at: Date.now() },
+  });
+  chrome.runtime.reload();
+}
+
+async function watchForNewBuilds(): Promise<void> {
+  try {
+    const { installType } = await chrome.management.getSelf();
+    if (installType !== 'development') return;
+    await chrome.alarms.create(BUILD_CHECK, { periodInMinutes: 1 });
+  } catch (error) {
+    dlog('[bg] build watch failed:', errorMessage(error));
+  }
+}
+
+chrome.alarms.onAlarm.addListener(({ name }) => {
+  if (name === BUILD_CHECK) reloadIfRebuilt().catch(() => {});
+});
+void watchForNewBuilds();
 
 // --- debug + live settings ----------------------------------------------
 // Keep the debug flag in sync with the popup toggle (no reload needed).

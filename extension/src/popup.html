@@ -47,8 +47,18 @@
 
     <button id="record" class="primary">Start recording</button>
 
-    <div id="error" class="error hidden"></div>
-    <div id="warning" class="warning hidden"></div>
+    <div id="error" class="error notice hidden">
+      <span class="text"></span>
+      <button class="dismiss" aria-label="Dismiss error" title="Dismiss">
+        ×
+      </button>
+    </div>
+    <div id="warning" class="warning notice hidden">
+      <span class="text"></span>
+      <button class="dismiss" aria-label="Dismiss warning" title="Dismiss">
+        ×
+      </button>
+    </div>
     <div id="insecure" class="warning hidden">
       This server has no access token: anyone who can reach it can stream to it
       and read every meeting, even on this machine. Set SCRIBE_TOKEN_FILE on the
@@ -56,7 +66,10 @@
     </div>
 
     <section id="result" class="result hidden">
-      <h2>Live transcript</h2>
+      <div class="result-head">
+        <h2 id="resultTitle">Live transcript</h2>
+        <button id="clearTranscript" class="link hidden">Clear</button>
+      </div>
       <div id="speakers" class="speakers"></div>
       <div id="transcript" class="script"></div>
     </section>

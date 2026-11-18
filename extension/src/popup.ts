@@ -4,6 +4,7 @@ import {
   getState,
   JOIN_SESSION_KEY,
   onStateChange,
+  setState,
   type RecState,
 } from './state';
 import type { Message, RecordingStatus } from './types';
@@ -32,6 +33,8 @@ const errorEl = $<HTMLElement>('error');
 const warningEl = $<HTMLElement>('warning');
 const insecureEl = $<HTMLElement>('insecure');
 const resultEl = $<HTMLElement>('result');
+const resultTitle = $<HTMLElement>('resultTitle');
+const clearTranscriptBtn = $<HTMLButtonElement>('clearTranscript');
 const speakersEl = $<HTMLElement>('speakers');
 const transcriptEl = $<HTMLElement>('transcript');
 
@@ -49,15 +52,13 @@ function render(state: RecState): void {
   voicesToggle.disabled = state.status !== 'idle';
   saveAudioNote.classList.toggle('hidden', state.status === 'idle');
 
-  if (state.error) {
-    errorEl.textContent = state.error;
-    errorEl.classList.remove('hidden');
-  } else {
-    errorEl.classList.add('hidden');
-  }
-  warningEl.textContent = state.warning ?? '';
-  warningEl.classList.toggle('hidden', !state.warning);
+  showNotice(errorEl, state.error);
+  showNotice(warningEl, state.warning);
   insecureEl.classList.toggle('hidden', !state.insecure);
+
+  const idle = state.status === 'idle';
+  resultTitle.textContent = idle ? 'Last transcript' : 'Live transcript';
+  clearTranscriptBtn.classList.toggle('hidden', !idle);
 
   if (state.segments && state.segments.length > 0) {
     renderSegments(state.segments);
@@ -67,6 +68,28 @@ function render(state: RecState): void {
     resultEl.classList.add('hidden');
   }
 }
+
+function showNotice(el: HTMLElement, text: string | undefined): void {
+  el.querySelector('.text')!.textContent = text ?? '';
+  el.classList.toggle('hidden', !text);
+}
+
+// A message outlives the recording it was about, through reloads and
+// restarts, until the next start; the × clears it now.
+for (const [el, key] of [
+  [errorEl, 'error'],
+  [warningEl, 'warning'],
+] as const) {
+  el.querySelector('.dismiss')!.addEventListener('click', () => {
+    setState({ [key]: undefined }).catch(() => {});
+  });
+}
+
+// Only the popup's copy: the session stays saved on the streaming service.
+// Hidden while recording, which would fill it straight back in.
+clearTranscriptBtn.addEventListener('click', () => {
+  setState({ segments: [], rawText: '' }).catch(() => {});
+});
 
 function applyMicPermission(permission: PermissionState): void {
   const granted = permission === 'granted';
