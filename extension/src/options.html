@@ -73,6 +73,28 @@
       <p id="micState" class="mic-state"></p>
     </section>
 
+    <section id="sites" class="panel">
+      <h2>Other meeting sites</h2>
+      <p>
+        Google Meet and Zoom are built in. On any other meeting site listed
+        here, one host per line, the extension also reads who is in the call and
+        whether you're muted: in a call with one other person their words get
+        their name, and your microphone sends silence while you're muted. Chrome
+        asks for access to each site once.
+      </p>
+      <form id="sitesForm" class="options">
+        <textarea
+          id="sitesInput"
+          rows="3"
+          spellcheck="false"
+          placeholder="video.example.com"
+          aria-label="Other meeting sites, one host per line"
+        ></textarea>
+        <button type="submit" class="primary">Save sites</button>
+      </form>
+      <p id="sitesState" class="mic-state"></p>
+    </section>
+
     <footer id="build" class="build"></footer>
 
     <script type="module" src="./options.ts"></script>

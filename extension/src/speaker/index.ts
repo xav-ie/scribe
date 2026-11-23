@@ -9,11 +9,18 @@ import { dlog, expose, setDebug } from '../debug';
 import type { Message } from '../types';
 import { meetingUrl } from '../meeting';
 import { domProbe, endNotices } from './dom';
+import { genericAdapter } from './generic';
 import { meetAdapter } from './meet';
 import { zoomAdapter } from './zoom';
 import type { SpeakerAdapter } from './types';
 
-const ADAPTERS: readonly SpeakerAdapter[] = [meetAdapter, zoomAdapter];
+// The generic adapter matches every page, so it goes last: it covers the sites
+// added on the options page, the only other pages this script is injected into.
+const ADAPTERS: readonly SpeakerAdapter[] = [
+  meetAdapter,
+  zoomAdapter,
+  genericAdapter,
+];
 const MAX_PROBES = 6;
 const MUTE_POLL_MS = 100;
 const adapter = ADAPTERS.find((a) => a.matches(location.host));

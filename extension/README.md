@@ -94,6 +94,14 @@ These adapters read obfuscated meeting-client DOM, so expect to re-tune them.
   come from the (stable) name wrapper.
 - **Zoom web** — uses stable BEM classes; the active tile gets an `--active`
   modifier, which is polled.
+- **Other sites** — meeting sites listed under **Other meeting sites** on the
+  options page get a generic adapter (`src/speaker/generic.ts`): names from the
+  text beside each `<video>`, your own tile told apart by a `local`/`self`/mirror
+  class or a mirrored video, and mute from a "Mute/Unmute microphone" button.
+  With no speaking signal, the speaker is only known in a call with exactly one
+  other person. The background registers the speaker script and mic hook for
+  these hosts at runtime, as a self-contained IIFE
+  (`src/speaker/standalone.iife.ts`), since the manifest can't name them.
 
 Turn on **Debug** in the popup to log detection to the **meeting tab's** console
 (`[speaker] active: <name>` on change, plus a `{tiles, names, speaking}` dump).
