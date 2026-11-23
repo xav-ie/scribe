@@ -3,8 +3,11 @@ import {
   BUILD,
   getSettings,
   grantServerAccess,
+  parseSites,
   saveServerUrl,
   serverOrigins,
+  setSettings,
+  siteOrigins,
   type SaveResult,
   type ServerCheck,
 } from './config';
@@ -149,7 +152,40 @@ async function grantMic(): Promise<void> {
 grantMicBtn.addEventListener('click', () => void grantMic());
 await trackMic();
 
+// Other meeting sites. Chrome only asks for access during a click, so the
+// request is the first thing the save awaits.
+const sitesInput = $<HTMLTextAreaElement>('sitesInput');
+const sitesStateEl = $<HTMLElement>('sitesState');
+
+async function saveSites(): Promise<void> {
+  let sites: string[];
+  try {
+    sites = parseSites(sitesInput.value);
+  } catch (error) {
+    sitesStateEl.textContent =
+      error instanceof Error ? error.message : String(error);
+    return;
+  }
+  if (
+    sites.length > 0 &&
+    !(await chrome.permissions.request({ origins: siteOrigins(sites) }))
+  ) {
+    sitesStateEl.textContent =
+      'Not saved: access to the sites was not granted.';
+    return;
+  }
+  await setSettings({ sites });
+  sitesInput.value = sites.join('\n');
+  sitesStateEl.textContent = 'Saved.';
+}
+
+$<HTMLFormElement>('sitesForm').addEventListener('submit', (event) => {
+  event.preventDefault();
+  void saveSites();
+});
+
 const settings = await getSettings();
+sitesInput.value = settings.sites.join('\n');
 wsUrlInput.value = settings.wsUrl;
 $<HTMLElement>('build').textContent = BUILD;
 

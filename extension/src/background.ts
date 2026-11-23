@@ -13,6 +13,7 @@ import {
   apiUrl,
   BUILD,
   getSettings,
+  siteOrigins,
   splitServerUrl,
 } from './config';
 import { dlog, expose, setDebug } from './debug';
@@ -34,6 +35,8 @@ import {
 } from './transcript';
 import type { Message } from './types';
 import { leftMeeting, meetingKey, meetingTitle, meetingUrl } from './meeting';
+// The speaker script as one self-contained file, for the options page's sites.
+import standaloneSpeakerScript from './speaker/standalone.iife.ts?script&iife';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
 // Adapter snapshots are kept only when they change (see keepSnapshot); this
@@ -290,7 +293,11 @@ async function startRecording(): Promise<void> {
 
   // Detection first: it also yields the participants' names, which the
   // streaming service boosts so they're transcribed right.
-  const detecting = await startSpeakerDetection(tab.id, platformOf(tab.url));
+  const detecting = await startSpeakerDetection(
+    tab.id,
+    platformOf(tab.url),
+    settings.sites,
+  );
   const boost = detecting === true ? await participantNames(tab.id) : [];
   if (stopped()) return;
 
@@ -409,9 +416,12 @@ const INJECT_POLL_MS = 150;
 async function startSpeakerDetection(
   tabId: number,
   platform: string | null,
+  sites: readonly string[],
 ): Promise<true | string> {
-  if (!platform || !SPEAKER_PLATFORMS.has(platform)) {
-    return 'Speaker detection only works on Google Meet and Zoom in the browser, so everyone will show as Unknown and muting is not detected.';
+  // An unknown platform is the tab's host (see platformOf).
+  const listed = platform !== null && sites.includes(platform);
+  if (!platform || (!SPEAKER_PLATFORMS.has(platform) && !listed)) {
+    return 'Speaker detection only works on Google Meet, Zoom and the meeting sites added in settings, so everyone will show as Unknown and muting is not detected.';
   }
   const reset = () =>
     chrome.tabs
@@ -424,7 +434,9 @@ async function startSpeakerDetection(
         () => false,
       );
   if (await reset()) return true;
-  const files = chrome.runtime.getManifest().content_scripts?.[0]?.js ?? [];
+  const files = listed
+    ? [standaloneSpeakerScript]
+    : (chrome.runtime.getManifest().content_scripts?.[0]?.js ?? []);
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: true },
@@ -828,22 +840,44 @@ chrome.runtime.onSuspend.addListener(() => {
 
 // public/mic-hook.js must run in the meeting page's own world before the page
 // asks for a mic, which a manifest content script can't do with CRXJS's loader,
-// so it's registered here. Install and update both land here.
+// so it's registered here. The meeting sites added on the options page get it
+// and the speaker script the same way, since the manifest can't name them.
+// Install, update and every change to the site list land here.
 const MIC_HOOK = 'mic-hook';
-async function registerMicHook(): Promise<void> {
+const SITE_SPEAKER = 'site-speaker';
+async function registerPageScripts(): Promise<void> {
+  const settings = await getSettings();
+  const sites = siteOrigins(settings.sites);
   await chrome.scripting
-    .unregisterContentScripts({ ids: [MIC_HOOK] })
+    .unregisterContentScripts({ ids: [MIC_HOOK, SITE_SPEAKER] })
     .catch(() => {});
   await chrome.scripting.registerContentScripts([
     {
       id: MIC_HOOK,
       js: ['mic-hook.js'],
-      matches: ['https://meet.google.com/*', 'https://*.zoom.us/*'],
+      matches: ['https://meet.google.com/*', 'https://*.zoom.us/*', ...sites],
       world: 'MAIN',
       runAt: 'document_start',
       allFrames: true,
     },
+    ...(sites.length > 0
+      ? [
+          {
+            id: SITE_SPEAKER,
+            js: [standaloneSpeakerScript],
+            matches: sites,
+            runAt: 'document_idle' as const,
+            allFrames: true,
+          },
+        ]
+      : []),
   ]);
+}
+
+function registerPageScriptsLogged(): void {
+  registerPageScripts().catch((error: unknown) => {
+    console.warn('[bg] page script registration failed:', errorMessage(error));
+  });
 }
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
@@ -852,9 +886,7 @@ chrome.runtime.onInstalled.addListener(({ reason }) => {
   if (reason === chrome.runtime.OnInstalledReason.INSTALL) {
     chrome.runtime.openOptionsPage().catch(() => {});
   }
-  registerMicHook().catch((error: unknown) => {
-    console.warn('[bg] mic hook registration failed:', errorMessage(error));
-  });
+  registerPageScriptsLogged();
 });
 chrome.runtime.onStartup.addListener(() => {
   reconcileStaleState().catch(() => {});
@@ -906,6 +938,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     setDebug(Boolean(changes.debug.newValue));
     dlog('[bg] debug logging enabled');
   }
+  if (changes.sites) registerPageScriptsLogged();
 });
 
 // Console test API — run from the service-worker DevTools console

@@ -21,6 +21,11 @@ export interface Settings {
   unless saveAudio is on).
   */
   voices: boolean;
+  /**
+  Hosts of other meeting sites, added on the options page, where the speaker
+  script runs with its generic adapter (see src/speaker/generic.ts).
+  */
+  sites: string[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -28,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   debug: false,
   saveAudio: true,
   voices: false,
+  sites: [],
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -172,4 +178,29 @@ export async function grantServerAccess(
     };
   }
   return checkAndSave(wsUrl);
+}
+
+/**
+The hosts in the options page's site list, one per line, given as a host or
+any address on it. Throws on a line that is neither.
+*/
+export function parseSites(text: string): string[] {
+  const hosts = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return new URL(line.includes('://') ? line : `https://${line}`)
+          .hostname;
+      } catch {
+        throw new Error(`"${line}" is not a web address or host.`);
+      }
+    });
+  return [...new Set(hosts)];
+}
+
+/** Match patterns for the pages of these hosts. */
+export function siteOrigins(sites: readonly string[]): string[] {
+  return sites.map((host) => `https://${host}/*`);
 }

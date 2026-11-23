@@ -166,7 +166,8 @@ button.secondary {
   color: var(--muted);
   font-size: 11px;
 }
-.field input {
+.field input,
+.options textarea {
   padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);

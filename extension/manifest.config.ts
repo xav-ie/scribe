@@ -68,6 +68,17 @@ export default defineManifest({
     'https://meet.google.com/*',
     'https://*.zoom.us/*',
   ],
+  // CRXJS lists runtime-registered scripts (the speaker script for the sites
+  // added on the options page) as web accessible on every site. Being one
+  // self-contained file, it needs no such access; a dynamic URL at least keeps
+  // pages from probing for it to detect the extension.
+  web_accessible_resources: [
+    {
+      matches: ['https://*/*'],
+      resources: ['<dynamic_resource>'],
+      use_dynamic_url: true,
+    },
+  ],
   // Active-speaker scraper, injected into supported meeting clients. It reports
   // speaker changes to the background worker, which joins them with the streamed
   // word timestamps (see src/speaker/, src/transcript.ts).
